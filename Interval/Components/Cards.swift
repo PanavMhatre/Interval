@@ -114,15 +114,20 @@ struct HealthStatTile: View {
             Text(value)
                 .font(Theme.Font.body(18, weight: .semibold))
                 .foregroundStyle(Theme.Palette.ink)
-            Capsule().fill(Theme.Palette.paperSoft)
-                .frame(height: 6)
+            Capsule().fill(Theme.Palette.peachDeep.opacity(0.5))
+                .frame(height: 8)
                 .overlay(
                     GeometryReader { geo in
-                        Capsule().fill(tint)
-                            .frame(width: geo.size.width * max(0, min(1, progress)))
+                        Capsule().fill(
+                            LinearGradient(
+                                colors: [Theme.Palette.sunny, tint],
+                                startPoint: .leading, endPoint: .trailing
+                            )
+                        )
+                        .frame(width: geo.size.width * max(0, min(1, progress)))
                     }
                 )
-                .frame(height: 6)
+                .frame(height: 8)
         }
         .padding(Theme.Space.sm)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -239,9 +244,9 @@ struct AskBar: View {
         HStack(spacing: 10) {
             ZStack {
                 Circle().fill(Theme.Palette.peachTint)
-                    .frame(width: 26, height: 26)
-                Text("i")
-                    .font(Theme.Font.display(14, weight: .semibold))
+                    .frame(width: 28, height: 28)
+                Image(systemName: "sparkles")
+                    .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(Theme.Palette.coralDeep)
             }
             TextField(placeholder, text: $text)
@@ -253,22 +258,26 @@ struct AskBar: View {
                     onSubmit?(text)
                     text = ""
                 }
-            Image(systemName: "command")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(Theme.Palette.inkMuted)
+            Button {
+                guard !text.isEmpty else { return }
+                Haptics.tap()
+                onSubmit?(text)
+                text = ""
+            } label: {
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 32, height: 32)
+                    .background(Circle().fill(text.isEmpty ? Theme.Palette.inkMuted.opacity(0.4) : Theme.Palette.coral))
+            }
+            .buttonStyle(.plain)
+            .disabled(text.isEmpty)
         }
         .padding(.horizontal, Theme.Space.md)
-        .padding(.vertical, 12)
+        .padding(.vertical, 10)
         .background(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(Theme.Palette.card)
+            Capsule().fill(Theme.Palette.card)
         )
-        .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .strokeBorder(
-                    Theme.Palette.ink.opacity(0.7),
-                    style: StrokeStyle(lineWidth: 1.2, dash: [5, 4])
-                )
-        )
+        .shadow(color: Theme.Palette.coral.opacity(0.10), radius: 14, x: 0, y: 6)
     }
 }

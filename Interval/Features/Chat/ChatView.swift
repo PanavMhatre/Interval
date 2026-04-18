@@ -13,6 +13,7 @@ struct ChatMessage: Identifiable, Hashable {
 
 struct ChatView: View {
     @Environment(\.modelContext) private var context
+    @Environment(AppRouter.self) private var router
     @Query private var profiles: [UserProfile]
 
     @State private var ai = IntervalAI()
@@ -56,6 +57,20 @@ struct ChatView: View {
         .onAppear {
             ai.prepare(with: context)
             if messages.isEmpty { seed() }
+            consumePendingPrompt()
+        }
+        .onChange(of: router.pendingChatPrompt) { _, _ in
+            consumePendingPrompt()
+        }
+    }
+
+    private func consumePendingPrompt() {
+        guard let prompt = router.pendingChatPrompt,
+              !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        router.pendingChatPrompt = nil
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            send(prompt)
         }
     }
 
@@ -173,7 +188,11 @@ struct ChatView: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, Theme.Space.md)
                     .padding(.vertical, 10)
-                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.Palette.ink))
+                    .background(
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .fill(Theme.Palette.coral)
+                    )
+                    .warmGlow(intensity: 0.18)
             }
         }
     }
@@ -305,4 +324,5 @@ struct ChatView: View {
 #Preview {
     ChatView()
         .modelContainer(previewContainer())
+        .environment(AppRouter())
 }

@@ -3,11 +3,14 @@ import SwiftData
 
 struct HomeView: View {
     @Environment(\.modelContext) private var context
+    @Environment(AppRouter.self) private var router
     @Query private var profiles: [UserProfile]
     @Query(sort: [SortDescriptor(\Medication.createdAt)]) private var medications: [Medication]
     @Query(sort: [SortDescriptor(\DoseLog.scheduledFor)]) private var doseLogs: [DoseLog]
     @Query(filter: #Predicate<HealthInsight> { !$0.dismissed }, sort: [SortDescriptor(\HealthInsight.createdAt, order: .reverse)])
     private var insights: [HealthInsight]
+
+    @State private var trendFor: TrendMetric? = nil
 
     private var profile: UserProfile? { profiles.first }
 
@@ -18,6 +21,8 @@ struct HomeView: View {
                 todaysMedsCard
                 statsRow
                 featuredInsight
+                sideEffectsCard
+                SymptomQuickLogCard()
                 timelineCard
                 askBarCard
             }
@@ -26,6 +31,18 @@ struct HomeView: View {
             .padding(.bottom, Theme.Space.xl)
         }
         .background(Theme.Palette.paper)
+        .sheet(item: $trendFor) { metric in
+            TrendDetailView(metric: metric)
+                .presentationDetents([.large])
+        }
+    }
+
+    private var sideEffectsCard: some View {
+        let tips = MedicationAdvisor.tips(
+            medications: medications,
+            allergies: profile?.allergies ?? []
+        )
+        return SideEffectsCard(tips: tips)
     }
 
     // MARK: Header
@@ -42,7 +59,14 @@ struct HomeView: View {
                     .foregroundStyle(Theme.Palette.ink)
             }
             Spacer()
-            AvatarCircle(initials: profile?.initials ?? "?", size: 44)
+            Button {
+                Haptics.tap()
+                router.tab = .profile
+            } label: {
+                AvatarCircle(initials: profile?.initials ?? "?", size: 44)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Open profile")
         }
     }
 
@@ -63,29 +87,43 @@ struct HomeView: View {
         let taken = doseLogs.filter { isToday($0.scheduledFor) && $0.isTaken }.count
         let progress = Double(taken) / Double(total)
 
-        return HStack(spacing: Theme.Space.md) {
-            ZStack {
-                ProgressRing(progress: progress, size: 70, lineWidth: 7)
-                VStack(spacing: 0) {
-                    Text("\(taken)/\(total)")
-                        .font(Theme.Font.body(18, weight: .semibold))
-                        .foregroundStyle(Theme.Palette.ink)
-                }
-            }
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Today's meds")
-                    .font(Theme.Font.cardTitle)
-                    .foregroundStyle(Theme.Palette.ink)
-                HStack(spacing: 6) {
-                    ForEach(medications.prefix(3), id: \.persistentModelID) { med in
-                        medChip(for: med)
+        return Button {
+            Haptics.tap()
+            trendFor = .meds
+        } label: {
+            HStack(spacing: Theme.Space.md) {
+                ZStack {
+                    ProgressRing(progress: progress, size: 70, lineWidth: 7)
+                    VStack(spacing: 0) {
+                        Text("\(taken)/\(total)")
+                            .font(Theme.Font.body(18, weight: .semibold))
+                            .foregroundStyle(Theme.Palette.ink)
                     }
                 }
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 6) {
+                        Text("Today's meds")
+                            .font(Theme.Font.cardTitle)
+                            .foregroundStyle(Theme.Palette.ink)
+                        Image(systemName: "chart.line.uptrend.xyaxis")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Theme.Palette.inkMuted)
+                    }
+                    HStack(spacing: 6) {
+                        ForEach(medications.prefix(3), id: \.persistentModelID) { med in
+                            medChip(for: med)
+                        }
+                    }
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(Theme.Palette.inkMuted)
             }
-            Spacer()
+            .padding(Theme.Space.md)
+            .softCard()
         }
-        .padding(Theme.Space.md)
-        .softCard()
+        .buttonStyle(.plain)
     }
 
     private func medChip(for med: Medication) -> some View {
@@ -118,10 +156,26 @@ struct HomeView: View {
 
     private var statsRow: some View {
         HStack(spacing: Theme.Space.sm) {
-            HealthStatTile(label: "Steps", value: "6,420", progress: 0.64, icon: "figure.walk", tint: Theme.Palette.coral)
-            HealthStatTile(label: "Sleep", value: "7h 12m", progress: 0.9, icon: "moon.fill", tint: Theme.Palette.lilac)
-            HealthStatTile(label: "Water", value: "3/8", progress: 0.375, icon: "drop.fill", tint: Theme.Palette.coral)
+            statTileButton(metric: .steps) {
+                HealthStatTile(label: "Steps", value: "6,420", progress: 0.64, icon: "figure.walk", tint: Theme.Palette.coral)
+            }
+            statTileButton(metric: .sleep) {
+                HealthStatTile(label: "Sleep", value: "7h 12m", progress: 0.9, icon: "moon.fill", tint: Theme.Palette.lilac)
+            }
+            statTileButton(metric: .water) {
+                HealthStatTile(label: "Water", value: "3/8", progress: 0.375, icon: "drop.fill", tint: Theme.Palette.coral)
+            }
         }
+    }
+
+    private func statTileButton<Content: View>(metric: TrendMetric, @ViewBuilder content: () -> Content) -> some View {
+        Button {
+            Haptics.tap()
+            trendFor = metric
+        } label: {
+            content()
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: Featured insight
@@ -227,7 +281,10 @@ struct HomeView: View {
     // MARK: Ask bar card
 
     private var askBarCard: some View {
-        AskBar(placeholder: "Ask about your health…")
+        AskBar(placeholder: "Ask about your health…") { text in
+            router.pendingChatPrompt = text
+            withAnimation(.smooth) { router.tab = .chat }
+        }
     }
 
     private func isToday(_ date: Date) -> Bool {
@@ -238,11 +295,12 @@ struct HomeView: View {
 #Preview {
     HomeView()
         .modelContainer(previewContainer())
+        .environment(AppRouter())
 }
 
 @MainActor
 func previewContainer() -> ModelContainer {
-    let schema = Schema([UserProfile.self, Medication.self, DoseLog.self, MedicalDocument.self, LabResult.self, HealthInsight.self])
+    let schema = Schema([UserProfile.self, Medication.self, DoseLog.self, MedicalDocument.self, LabResult.self, HealthInsight.self, SymptomLog.self])
     let config = ModelConfiguration(isStoredInMemoryOnly: true)
     let container = try! ModelContainer(for: schema, configurations: config)
     SampleData.seedIfNeeded(container.mainContext)

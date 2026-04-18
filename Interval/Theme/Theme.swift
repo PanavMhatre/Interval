@@ -2,35 +2,49 @@ import SwiftUI
 
 enum Theme {
 
-    // MARK: - Palette
+    // MARK: - Palette (VitalVault "golden hour")
 
     enum Palette {
-        static let paper        = Color(red: 0.965, green: 0.949, blue: 0.918)
-        static let paperSoft    = Color(red: 0.984, green: 0.973, blue: 0.949)
+        // Warm cream / peach surfaces
+        static let paper        = Color(red: 1.000, green: 0.972, blue: 0.960) // #fff8f5
+        static let paperSoft    = Color(red: 1.000, green: 0.945, blue: 0.912) // #fff1e9
         static let card         = Color.white
-        static let ink          = Color(red: 0.094, green: 0.094, blue: 0.102)
-        static let inkSoft      = Color(red: 0.329, green: 0.329, blue: 0.341)
-        static let inkMuted     = Color(red: 0.541, green: 0.541, blue: 0.553)
-        static let hairline     = Color(red: 0.835, green: 0.820, blue: 0.788)
+        static let peachTint    = Color(red: 1.000, green: 0.918, blue: 0.867) // #ffeadd
+        static let peachSoft    = Color(red: 1.000, green: 0.945, blue: 0.912) // #fff1e9
+        static let peachDeep    = Color(red: 0.953, green: 0.875, blue: 0.820) // #f3dfd1
 
-        static let coral        = Color(red: 0.941, green: 0.490, blue: 0.388)
-        static let coralDeep    = Color(red: 0.875, green: 0.388, blue: 0.290)
-        static let peachTint    = Color(red: 0.996, green: 0.890, blue: 0.867)
-        static let peachSoft    = Color(red: 0.988, green: 0.933, blue: 0.918)
+        // Ink
+        static let ink          = Color(red: 0.141, green: 0.098, blue: 0.071) // #241912
+        static let inkSoft      = Color(red: 0.337, green: 0.263, blue: 0.204) // #564334
+        static let inkMuted     = Color(red: 0.537, green: 0.451, blue: 0.384) // #897362
+        static let hairline     = Color(red: 0.867, green: 0.757, blue: 0.682) // #ddc1ae
 
-        static let sage         = Color(red: 0.710, green: 0.831, blue: 0.686)
-        static let sageDeep     = Color(red: 0.357, green: 0.557, blue: 0.341)
+        // Primary — vibrant "golden hour" orange
+        static let coral        = Color(red: 1.000, green: 0.549, blue: 0.000) // #ff8c00
+        static let coralDeep    = Color(red: 0.565, green: 0.302, blue: 0.000) // #904d00
+
+        // Secondary coral-red
+        static let secondary    = Color(red: 0.996, green: 0.494, blue: 0.310) // #fe7e4f
+        static let secondaryDeep = Color(red: 0.643, green: 0.235, blue: 0.071) // #a43c12
+
+        // Sunny yellow-olive (tertiary)
+        static let sunny        = Color(red: 0.780, green: 0.659, blue: 0.000) // #c7a800
+        static let sunnyDeep    = Color(red: 0.439, green: 0.365, blue: 0.000) // #705d00
+
+        // Mint / teal (success + tab accent)
+        static let sage         = Color(red: 0.725, green: 0.875, blue: 0.690)
+        static let sageDeep     = Color(red: 0.165, green: 0.616, blue: 0.561) // #2a9d8f
         static let mint         = Color(red: 0.863, green: 0.929, blue: 0.847)
 
-        static let sunny        = Color(red: 0.988, green: 0.827, blue: 0.478)
-        static let lilac        = Color(red: 0.820, green: 0.804, blue: 0.929)
+        // Soft lilac (variety)
+        static let lilac        = Color(red: 0.905, green: 0.870, blue: 0.965)
     }
 
-    // MARK: - Typography
+    // MARK: - Typography (SF Rounded — closest match to Lexend on iOS)
 
     enum Font {
-        static func display(_ size: CGFloat, weight: SwiftUI.Font.Weight = .semibold) -> SwiftUI.Font {
-            .system(size: size, weight: weight, design: .serif)
+        static func display(_ size: CGFloat, weight: SwiftUI.Font.Weight = .bold) -> SwiftUI.Font {
+            .system(size: size, weight: weight, design: .rounded)
         }
         static func body(_ size: CGFloat, weight: SwiftUI.Font.Weight = .regular) -> SwiftUI.Font {
             .system(size: size, weight: weight, design: .rounded)
@@ -39,9 +53,9 @@ enum Theme {
             .system(size: size, weight: weight, design: .monospaced)
         }
 
-        static let hero         = display(34, weight: .bold)
-        static let title        = display(26, weight: .semibold)
-        static let sectionTitle = display(20, weight: .semibold)
+        static let hero         = display(36, weight: .heavy)
+        static let title        = display(28, weight: .bold)
+        static let sectionTitle = display(22, weight: .bold)
         static let cardTitle    = body(17, weight: .semibold)
         static let bodyText     = body(15, weight: .regular)
         static let bodyBold     = body(15, weight: .semibold)
@@ -56,16 +70,17 @@ enum Theme {
         static let xs:  CGFloat = 8
         static let sm:  CGFloat = 12
         static let md:  CGFloat = 16
-        static let lg:  CGFloat = 20
-        static let xl:  CGFloat = 28
-        static let xxl: CGFloat = 40
+        static let lg:  CGFloat = 24
+        static let xl:  CGFloat = 32
+        static let xxl: CGFloat = 48
     }
 
     enum Radius {
-        static let sm: CGFloat = 10
-        static let md: CGFloat = 14
-        static let lg: CGFloat = 20
-        static let xl: CGFloat = 28
+        static let sm: CGFloat = 14
+        static let md: CGFloat = 22
+        static let lg: CGFloat = 28
+        static let xl: CGFloat = 36
+        static let pill: CGFloat = 9999
     }
 }
 
@@ -77,10 +92,12 @@ struct PaperBackground: ViewModifier {
     }
 }
 
+/// Elevated card: warm-shadow depth, no visible border by default.
 struct SoftCard: ViewModifier {
     var fill: Color = Theme.Palette.card
     var radius: CGFloat = Theme.Radius.md
-    var stroke: Color = Theme.Palette.hairline
+    var stroke: Color = .clear
+    var elevated: Bool = true
 
     func body(content: Content) -> some View {
         content
@@ -91,8 +108,20 @@ struct SoftCard: ViewModifier {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .strokeBorder(stroke, lineWidth: 1)
+                    .strokeBorder(stroke, lineWidth: stroke == .clear ? 0 : 1)
             )
+            .shadow(
+                color: Theme.Palette.coral.opacity(elevated ? 0.10 : 0),
+                radius: 14, x: 0, y: 6
+            )
+    }
+}
+
+/// Tinted warm glow for primary actions / hero elements.
+struct WarmGlow: ViewModifier {
+    var intensity: Double = 0.22
+    func body(content: Content) -> some View {
+        content.shadow(color: Theme.Palette.coral.opacity(intensity), radius: 16, x: 0, y: 10)
     }
 }
 
@@ -110,10 +139,25 @@ extension View {
     func paperBackground() -> some View { modifier(PaperBackground()) }
     func softCard(fill: Color = Theme.Palette.card,
                   radius: CGFloat = Theme.Radius.md,
-                  stroke: Color = Theme.Palette.hairline) -> some View {
-        modifier(SoftCard(fill: fill, radius: radius, stroke: stroke))
+                  stroke: Color = .clear,
+                  elevated: Bool = true) -> some View {
+        modifier(SoftCard(fill: fill, radius: radius, stroke: stroke, elevated: elevated))
     }
+    func warmGlow(intensity: Double = 0.22) -> some View { modifier(WarmGlow(intensity: intensity)) }
     func eyebrowStyle() -> some View { modifier(EyebrowLabel()) }
+}
+
+// MARK: - Shared gradients
+
+extension LinearGradient {
+    static let goldenHour = LinearGradient(
+        colors: [Theme.Palette.sunny, Theme.Palette.coral],
+        startPoint: .leading, endPoint: .trailing
+    )
+    static let warmCard = LinearGradient(
+        colors: [Theme.Palette.peachSoft, Theme.Palette.peachTint],
+        startPoint: .topLeading, endPoint: .bottomTrailing
+    )
 }
 
 // MARK: - Haptics

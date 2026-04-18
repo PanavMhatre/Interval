@@ -3,19 +3,40 @@ import SwiftData
 
 struct ContentView: View {
     @Environment(\.modelContext) private var context
+    @Environment(AppRouter.self) private var router
     @Query private var profiles: [UserProfile]
 
-    @State private var selection: Tab = .home
     @State private var didPrepareHaptics = false
 
-    enum Tab: Hashable {
-        case home, docs, meds, chat, profile
-    }
-
     var body: some View {
-        Group {
+        @Bindable var router = router
+        return Group {
             if let profile = profiles.first, profile.hasCompletedOnboarding {
-                mainTabs
+                TabView(selection: $router.tab) {
+                    NavigationStack { HomeView().navigationBarHidden(true) }
+                        .tabItem { Label("Home",  systemImage: "house.fill") }
+                        .tag(AppTab.home)
+
+                    NavigationStack { DocumentsView().navigationBarHidden(true) }
+                        .tabItem { Label("Docs",  systemImage: "doc.text.fill") }
+                        .tag(AppTab.docs)
+
+                    NavigationStack { MedicationsView().navigationBarHidden(true) }
+                        .tabItem { Label("Meds",  systemImage: "pills.fill") }
+                        .tag(AppTab.meds)
+
+                    NavigationStack { ChatView() }
+                        .tabItem { Label("Chat",  systemImage: "bubble.left.and.bubble.right.fill") }
+                        .tag(AppTab.chat)
+
+                    NavigationStack { ProfileView().navigationBarHidden(true) }
+                        .tabItem { Label("Profile", systemImage: "person.crop.circle.fill") }
+                        .tag(AppTab.profile)
+                }
+                .tint(Theme.Palette.coral)
+                .onChange(of: router.tab) { _, _ in
+                    Haptics.select()
+                }
             } else {
                 OnboardingView()
                     .transition(.opacity.combined(with: .move(edge: .trailing)))
@@ -30,37 +51,10 @@ struct ContentView: View {
             }
         }
     }
-
-    private var mainTabs: some View {
-        TabView(selection: $selection) {
-            NavigationStack { HomeView().navigationBarHidden(true) }
-                .tabItem { Label("Home",  systemImage: "house.fill") }
-                .tag(Tab.home)
-
-            NavigationStack { DocumentsView().navigationBarHidden(true) }
-                .tabItem { Label("Docs",  systemImage: "doc.text.fill") }
-                .tag(Tab.docs)
-
-            NavigationStack { MedicationsView().navigationBarHidden(true) }
-                .tabItem { Label("Meds",  systemImage: "pills.fill") }
-                .tag(Tab.meds)
-
-            NavigationStack { ChatView() }
-                .tabItem { Label("Chat",  systemImage: "bubble.left.and.bubble.right.fill") }
-                .tag(Tab.chat)
-
-            NavigationStack { ProfileView().navigationBarHidden(true) }
-                .tabItem { Label("Profile", systemImage: "person.crop.circle.fill") }
-                .tag(Tab.profile)
-        }
-        .tint(Theme.Palette.coralDeep)
-        .onChange(of: selection) { _, _ in
-            Haptics.select()
-        }
-    }
 }
 
 #Preview("App entry") {
     ContentView()
         .modelContainer(previewContainer())
+        .environment(AppRouter())
 }

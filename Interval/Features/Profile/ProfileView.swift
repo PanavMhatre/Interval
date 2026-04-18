@@ -6,6 +6,10 @@ struct ProfileView: View {
     @Query(sort: [SortDescriptor(\Medication.createdAt)]) private var medications: [Medication]
     @Query(sort: [SortDescriptor(\LabResult.capturedAt, order: .reverse)]) private var labs: [LabResult]
     @Query(sort: [SortDescriptor(\MedicalDocument.capturedAt, order: .reverse)]) private var documents: [MedicalDocument]
+    @Query(sort: [SortDescriptor(\SymptomLog.occurredAt, order: .reverse)]) private var symptoms: [SymptomLog]
+
+    @State private var showEdit = false
+    @State private var showTimeline = false
 
     private var profile: UserProfile? { profiles.first }
 
@@ -17,6 +21,7 @@ struct ProfileView: View {
                 conditionsCard
                 allergiesCard
                 currentMedsCard
+                symptomTimelineCard
                 recentLabsCard
                 whatIKnowCard
                 shareCard
@@ -26,12 +31,20 @@ struct ProfileView: View {
             .padding(.bottom, Theme.Space.xl)
         }
         .background(Theme.Palette.paper)
+        .sheet(isPresented: $showEdit) {
+            if let profile {
+                EditProfileSheet(profile: profile)
+            }
+        }
+        .sheet(isPresented: $showTimeline) {
+            SymptomTimelineView()
+        }
     }
 
     // MARK: Identity
 
     private var identityHeader: some View {
-        HStack(spacing: Theme.Space.md) {
+        HStack(alignment: .top, spacing: Theme.Space.md) {
             AvatarCircle(initials: profile?.initials ?? "?", size: 66)
             VStack(alignment: .leading, spacing: 6) {
                 Text(profile?.name ?? "—")
@@ -46,6 +59,21 @@ struct ProfileView: View {
                 }
             }
             Spacer()
+            Button {
+                Haptics.tap()
+                showEdit = true
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "pencil").font(.system(size: 11, weight: .bold))
+                    Text("Edit").font(Theme.Font.body(13, weight: .semibold))
+                }
+                .foregroundStyle(Theme.Palette.ink)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .overlay(Capsule().strokeBorder(Theme.Palette.ink.opacity(0.7), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .disabled(profile == nil)
         }
     }
 
@@ -69,7 +97,7 @@ struct ProfileView: View {
                 snapshotTile(label: "Iron", value: "52 µg/dL", detail: "↓ Low", accent: Theme.Palette.coralDeep, tint: Theme.Palette.peachTint)
                 snapshotTile(label: "HR Rest", value: "68 bpm", detail: "7-day avg", accent: Theme.Palette.ink, tint: Theme.Palette.paperSoft)
                 snapshotTile(label: "Sleep", value: "7h 4m", detail: "7-day avg", accent: Theme.Palette.ink, tint: Theme.Palette.paperSoft)
-                snapshotTile(label: "Weight", value: "141 lb", detail: "↓ 2 lb / mo", accent: Theme.Palette.sageDeep, tint: Theme.Palette.mint)
+                snapshotTile(label: "Weight", value: "\(profile?.weightPounds ?? 0) lb", detail: "Edit to update", accent: Theme.Palette.sageDeep, tint: Theme.Palette.mint)
             }
         }
     }
@@ -175,6 +203,86 @@ struct ProfileView: View {
         .softCard()
     }
 
+    // MARK: Symptom timeline
+
+    private var symptomTimelineCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                HStack(spacing: 6) {
+                    Image(systemName: "heart.text.square.fill")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(Theme.Palette.coralDeep)
+                    Text("Symptom timeline".uppercased()).eyebrowStyle()
+                }
+                Spacer()
+                Button {
+                    Haptics.tap()
+                    showTimeline = true
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(symptoms.isEmpty ? "Add one" : "View all")
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 10, weight: .bold))
+                    }
+                    .font(Theme.Font.body(12, weight: .semibold))
+                    .foregroundStyle(Theme.Palette.coralDeep)
+                }
+                .buttonStyle(.plain)
+            }
+
+            if symptoms.isEmpty {
+                Text("You haven't logged any symptoms yet. Start when something feels off — I'll keep a record you can share with your doctor.")
+                    .font(Theme.Font.body(13))
+                    .foregroundStyle(Theme.Palette.inkSoft)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(symptoms.prefix(4).enumerated()), id: \.element.persistentModelID) { idx, log in
+                        symptomMiniRow(log)
+                        if idx < min(symptoms.count, 4) - 1 {
+                            DashedHairline()
+                        }
+                    }
+                }
+            }
+        }
+        .padding(Theme.Space.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .softCard()
+    }
+
+    private func symptomMiniRow(_ log: SymptomLog) -> some View {
+        HStack(spacing: 10) {
+            ZStack {
+                Circle().fill(Theme.Palette.peachTint).frame(width: 28, height: 28)
+                Image(systemName: SymptomCatalog.icon(for: log.symptom))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.Palette.coralDeep)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(log.symptom)
+                        .font(Theme.Font.body(14, weight: .semibold))
+                        .foregroundStyle(Theme.Palette.ink)
+                    Text(log.severityLabel)
+                        .font(Theme.Font.body(10, weight: .semibold))
+                        .foregroundStyle(Theme.Palette.coralDeep)
+                }
+                Text(log.occurredAt.formatted(.relative(presentation: .named)))
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(Theme.Palette.inkMuted)
+            }
+            Spacer()
+            if let med = log.relatedMedName {
+                Text(med)
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(Theme.Palette.inkMuted)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.vertical, 8)
+    }
+
     // MARK: Recent labs
 
     private var recentLabsCard: some View {
@@ -227,6 +335,7 @@ struct ProfileView: View {
                 bullet("\(profile?.conditions.count ?? 0) conditions, \(profile?.allergies.count ?? 0) allergies")
                 bullet("\(medications.count) active meds")
                 bullet("\(documents.count) documents (\(labs.count) labs parsed)")
+                bullet("\(symptoms.count) symptom log\(symptoms.count == 1 ? "" : "s")")
                 bullet("18 months of HealthKit data")
             }
         }

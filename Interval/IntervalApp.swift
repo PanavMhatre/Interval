@@ -3,6 +3,8 @@ import SwiftData
 
 @main
 struct IntervalApp: App {
+    @State private var router = AppRouter()
+
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
             UserProfile.self,
@@ -10,7 +12,8 @@ struct IntervalApp: App {
             DoseLog.self,
             MedicalDocument.self,
             LabResult.self,
-            HealthInsight.self
+            HealthInsight.self,
+            SymptomLog.self
         ])
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
         do {
@@ -23,6 +26,7 @@ struct IntervalApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environment(router)
         }
         .modelContainer(sharedModelContainer)
     }

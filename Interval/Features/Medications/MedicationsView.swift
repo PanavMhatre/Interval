@@ -5,8 +5,19 @@ struct MedicationsView: View {
     @Environment(\.modelContext) private var context
     @Query(sort: [SortDescriptor(\Medication.createdAt)]) private var medications: [Medication]
     @Query private var doseLogs: [DoseLog]
+    @Query private var profiles: [UserProfile]
 
     @State private var showAdd = false
+    @State private var innerTab: InnerTab = .schedule
+
+    enum InnerTab: String, CaseIterable, Identifiable {
+        case schedule = "Schedule"
+        case medicines = "Medicines"
+        case interactions = "Interactions"
+        var id: String { rawValue }
+    }
+
+    private var allergies: [String] { profiles.first?.allergies ?? [] }
 
     var body: some View {
         ScrollView {
@@ -14,40 +25,17 @@ struct MedicationsView: View {
                 SectionHeader(
                     eyebrow: "Today",
                     title: "Medications",
-                    subtitle: "Everything you're taking — organized."
+                    subtitle: tabSubtitle
                 )
 
-                scheduleRibbon
+                innerTabPicker
 
-                ForEach(medications, id: \.persistentModelID) { med in
-                    medicationCard(med)
-                }
-
-                Button {
-                    Haptics.tap()
-                    showAdd = true
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "plus")
-                        Text("Add medication")
-                    }
-                    .font(Theme.Font.body(15, weight: .semibold))
-                    .foregroundStyle(Theme.Palette.ink)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
-                            .strokeBorder(
-                                Theme.Palette.ink.opacity(0.8),
-                                style: StrokeStyle(lineWidth: 1.5, dash: [5, 4])
-                            )
-                    )
-                }
-                .buttonStyle(.plain)
+                tabContent
             }
             .padding(.horizontal, Theme.Space.lg)
             .padding(.top, Theme.Space.md)
             .padding(.bottom, Theme.Space.xl)
+            .animation(.smooth(duration: 0.25), value: innerTab)
         }
         .background(Theme.Palette.paper)
         .sheet(isPresented: $showAdd) {
@@ -56,6 +44,181 @@ struct MedicationsView: View {
             }
             .presentationDetents([.large])
         }
+    }
+
+    private var tabSubtitle: String {
+        switch innerTab {
+        case .schedule:     "Your day at a glance."
+        case .medicines:    "Everything you're taking — organized."
+        case .interactions: "Known drug interactions and what to avoid."
+        }
+    }
+
+    // MARK: Inner tab picker
+
+    private var innerTabPicker: some View {
+        HStack(spacing: 6) {
+            ForEach(InnerTab.allCases) { tab in
+                Button {
+                    Haptics.select()
+                    withAnimation(.snappy) { innerTab = tab }
+                } label: {
+                    Text(tab.rawValue)
+                        .font(Theme.Font.body(13, weight: .semibold))
+                        .foregroundStyle(innerTab == tab ? .white : Theme.Palette.ink)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(Capsule().fill(innerTab == tab ? Theme.Palette.ink : Color.clear))
+                        .overlay(Capsule().strokeBorder(Theme.Palette.ink.opacity(innerTab == tab ? 0 : 0.6), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer()
+        }
+    }
+
+    // MARK: Tab content
+
+    @ViewBuilder
+    private var tabContent: some View {
+        switch innerTab {
+        case .schedule:     scheduleTab
+        case .medicines:    medicinesTab
+        case .interactions: interactionsTab
+        }
+    }
+
+    private var scheduleTab: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.lg) {
+            AdherenceScoreCard(logs: doseLogs, medications: medications)
+            scheduleRibbon
+            todaysUpcomingList
+        }
+    }
+
+    private var medicinesTab: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.lg) {
+            if medications.isEmpty {
+                emptyMedsState
+            } else {
+                ForEach(medications, id: \.persistentModelID) { med in
+                    medicationCard(med)
+                }
+            }
+            addMedicationButton
+        }
+    }
+
+    private var interactionsTab: some View {
+        InteractionsTabContent(medications: medications, allergies: allergies)
+    }
+
+    // MARK: Today's upcoming list (schedule tab)
+
+    private var todaysUpcomingList: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.sm) {
+            Text("Today's doses".uppercased())
+                .font(Theme.Font.eyebrow)
+                .tracking(1)
+                .foregroundStyle(Theme.Palette.inkMuted)
+            VStack(spacing: 8) {
+                ForEach(todaysDoseLogs, id: \.persistentModelID) { log in
+                    doseRow(log)
+                }
+                if todaysDoseLogs.isEmpty {
+                    Text("No doses scheduled for today.")
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(Theme.Palette.inkMuted)
+                        .padding(.vertical, 10)
+                }
+            }
+        }
+    }
+
+    private var todaysDoseLogs: [DoseLog] {
+        doseLogs
+            .filter { Calendar.current.isDateInToday($0.scheduledFor) }
+            .sorted { $0.scheduledFor < $1.scheduledFor }
+    }
+
+    private func doseRow(_ log: DoseLog) -> some View {
+        HStack(spacing: 12) {
+            Text(log.scheduledFor.formatted(.dateTime.hour().minute()))
+                .font(Theme.Font.mono(12, weight: .semibold))
+                .foregroundStyle(Theme.Palette.inkMuted)
+                .frame(width: 60, alignment: .leading)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(log.medication?.name ?? "—")
+                    .font(Theme.Font.body(14, weight: .semibold))
+                    .foregroundStyle(Theme.Palette.ink)
+                if let med = log.medication {
+                    Text(med.doseText)
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(Theme.Palette.inkMuted)
+                }
+            }
+            Spacer()
+            if log.isTaken {
+                StatusChip(text: "Taken", kind: .done)
+            } else if log.scheduledFor <= .now {
+                StatusChip(text: "Now", kind: .now)
+            } else {
+                StatusChip(text: "Later", kind: .later)
+            }
+        }
+        .padding(.horizontal, Theme.Space.md)
+        .padding(.vertical, Theme.Space.sm)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.Radius.sm, style: .continuous)
+                .fill(Theme.Palette.card)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.sm, style: .continuous)
+                .strokeBorder(Theme.Palette.hairline, lineWidth: 1)
+        )
+    }
+
+    // MARK: Shared bits
+
+    private var addMedicationButton: some View {
+        Button {
+            Haptics.tap()
+            showAdd = true
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "plus")
+                Text("Add medication")
+            }
+            .font(Theme.Font.body(15, weight: .semibold))
+            .foregroundStyle(Theme.Palette.ink)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
+                    .strokeBorder(
+                        Theme.Palette.ink.opacity(0.8),
+                        style: StrokeStyle(lineWidth: 1.5, dash: [5, 4])
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var emptyMedsState: some View {
+        VStack(spacing: 6) {
+            Image(systemName: "pills.fill")
+                .font(.system(size: 28, weight: .light))
+                .foregroundStyle(Theme.Palette.inkMuted)
+            Text("No medications yet")
+                .font(Theme.Font.body(15, weight: .semibold))
+                .foregroundStyle(Theme.Palette.ink)
+            Text("Add your first med to unlock reminders and interaction checks.")
+                .font(Theme.Font.caption)
+                .foregroundStyle(Theme.Palette.inkMuted)
+                .multilineTextAlignment(.center)
+        }
+        .padding(.vertical, Theme.Space.xl)
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: Ribbon

@@ -106,6 +106,29 @@ enum SampleData {
             kind: .flag
         ))
 
+        // Symptom logs
+        context.insert(SymptomLog(
+            symptom: "Dry cough",
+            severity: 2,
+            occurredAt: time(22, 30, dayOffset: -1),
+            notes: "Worst right before bed. No other cold symptoms.",
+            relatedMedName: "Lisinopril"
+        ))
+        context.insert(SymptomLog(
+            symptom: "Headache",
+            severity: 3,
+            occurredAt: time(15, 10, dayOffset: -3),
+            notes: "Right temple, lasted about an hour.",
+            relatedMedName: nil
+        ))
+        context.insert(SymptomLog(
+            symptom: "Fatigue",
+            severity: 2,
+            occurredAt: time(9, 0, dayOffset: -5),
+            notes: "Dragged all morning despite 8h sleep.",
+            relatedMedName: nil
+        ))
+
         try? context.save()
     }
 }

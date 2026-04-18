@@ -9,6 +9,7 @@ final class UserProfile {
     var sex: String
     var bloodType: String
     var heightInches: Int
+    var weightPounds: Int = 141
     var location: String
     var conditions: [String]
     var allergies: [String]
@@ -22,6 +23,7 @@ final class UserProfile {
         sex: String = "Female",
         bloodType: String = "O+",
         heightInches: Int = 66,
+        weightPounds: Int = 141,
         location: String = "Austin, TX",
         conditions: [String] = ["Hypertension", "Prediabetes", "Iron def."],
         allergies: [String] = ["Penicillin", "Shellfish"],
@@ -34,6 +36,7 @@ final class UserProfile {
         self.sex = sex
         self.bloodType = bloodType
         self.heightInches = heightInches
+        self.weightPounds = weightPounds
         self.location = location
         self.conditions = conditions
         self.allergies = allergies

@@ -101,11 +101,11 @@ struct PrimaryButton: View {
             }
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 14)
+            .padding(.vertical, 15)
             .background(
                 Capsule().fill(enabled ? Theme.Palette.coral : Theme.Palette.inkMuted.opacity(0.4))
             )
-            .shadow(color: Theme.Palette.coral.opacity(enabled ? 0.22 : 0), radius: 10, y: 6)
+            .shadow(color: Theme.Palette.coral.opacity(enabled ? 0.28 : 0), radius: 14, y: 8)
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
