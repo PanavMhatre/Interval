@@ -3,6 +3,7 @@ import SwiftData
 
 struct HomeView: View {
     @Environment(\.modelContext) private var context
+    @EnvironmentObject private var appleHealth: AppleHealthStore
     @Query private var profiles: [UserProfile]
     @Query(sort: [SortDescriptor(\Medication.createdAt)]) private var medications: [Medication]
     @Query(sort: [SortDescriptor(\DoseLog.scheduledFor)]) private var doseLogs: [DoseLog]
@@ -19,13 +20,15 @@ struct HomeView: View {
                 statsRow
                 featuredInsight
                 timelineCard
-                askBarCard
             }
             .padding(.horizontal, Theme.Space.lg)
             .padding(.top, Theme.Space.md)
             .padding(.bottom, Theme.Space.xl)
         }
         .background(Theme.Palette.paper)
+        .task(id: appleHealth.isConnected) {
+            await appleHealth.refreshIfNeeded()
+        }
     }
 
     // MARK: Header
@@ -76,16 +79,26 @@ struct HomeView: View {
                 Text("Today's meds")
                     .font(Theme.Font.cardTitle)
                     .foregroundStyle(Theme.Palette.ink)
-                HStack(spacing: 6) {
+                FlowLayout(spacing: 6) {
                     ForEach(medications.prefix(3), id: \.persistentModelID) { med in
                         medChip(for: med)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             Spacer()
         }
-        .padding(Theme.Space.md)
-        .softCard()
+        .padding(Theme.Space.lg)
+        .background(
+            RoundedRectangle(cornerRadius: 30, style: .continuous)
+                .fill(Theme.Palette.surfaceContainerLowest)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 30, style: .continuous)
+                .strokeBorder(Theme.Palette.outlineVariant.opacity(0.9), lineWidth: 1)
+        )
+        .shadow(color: Theme.Shadow.ambient.opacity(0.5), radius: 16, y: 8)
+        .shadow(color: Theme.Shadow.warm.opacity(0.2), radius: 5, y: 2)
     }
 
     private func medChip(for med: Medication) -> some View {
@@ -96,14 +109,33 @@ struct HomeView: View {
         let border = taken ? Theme.Palette.sageDeep.opacity(0.3) : Theme.Palette.coral.opacity(0.3)
         let foreground = taken ? Theme.Palette.sageDeep : Theme.Palette.coralDeep
 
-        let label = taken ? "✓ " + med.name.prefix(5) : (upcoming ? timeShort(for: med) + " " + med.name.prefix(4) : med.name.prefix(5))
+        let label = chipLabel(for: med, taken: taken, upcoming: upcoming)
         return Text(label)
             .font(Theme.Font.body(11, weight: .semibold))
             .foregroundStyle(foreground)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(fill))
-            .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(border, lineWidth: 1))
+            .lineLimit(1)
+            .minimumScaleFactor(0.85)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .fixedSize(horizontal: true, vertical: false)
+            .background(Capsule().fill(fill))
+            .overlay(Capsule().strokeBorder(border, lineWidth: 1))
+    }
+
+    private func chipLabel(for med: Medication, taken: Bool, upcoming: Bool) -> String {
+        let baseName = med.name.split(separator: " ").first.map(String.init) ?? med.name
+        let shortName = String(baseName.prefix(6))
+
+        if taken {
+            return "✓ \(shortName)"
+        }
+
+        if upcoming {
+            let time = timeShort(for: med)
+            return time.isEmpty ? shortName : "\(time) \(shortName)"
+        }
+
+        return shortName
     }
 
     private func timeShort(for med: Medication) -> String {
@@ -118,9 +150,9 @@ struct HomeView: View {
 
     private var statsRow: some View {
         HStack(spacing: Theme.Space.sm) {
-            HealthStatTile(label: "Steps", value: "6,420", progress: 0.64, icon: "figure.walk", tint: Theme.Palette.coral)
-            HealthStatTile(label: "Sleep", value: "7h 12m", progress: 0.9, icon: "moon.fill", tint: Theme.Palette.lilac)
-            HealthStatTile(label: "Water", value: "3/8", progress: 0.375, icon: "drop.fill", tint: Theme.Palette.coral)
+            HealthStatTile(label: "Steps", value: stepsValue, progress: stepsProgress, icon: "figure.walk", tint: Theme.Palette.coral)
+            HealthStatTile(label: "Sleep", value: sleepValue, progress: sleepProgress, icon: "moon.fill", tint: Theme.Palette.lilac)
+            HealthStatTile(label: "Water", value: waterValue, progress: waterProgress, icon: "drop.fill", tint: Theme.Palette.coral)
         }
     }
 
@@ -157,42 +189,135 @@ struct HomeView: View {
                         Text(entry.label)
                             .font(Theme.Font.body(14, weight: .medium))
                             .foregroundStyle(Theme.Palette.ink)
+                            .lineLimit(1)
                         Spacer()
                         chip(for: entry.status)
                     }
                     .padding(.horizontal, Theme.Space.md)
-                    .padding(.vertical, 10)
+                    .padding(.vertical, 13)
                     .background(
-                        RoundedRectangle(cornerRadius: Theme.Radius.sm, style: .continuous)
-                            .fill(Theme.Palette.card)
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(Theme.Palette.surfaceContainerLowest)
                     )
                     .overlay(
-                        RoundedRectangle(cornerRadius: Theme.Radius.sm, style: .continuous)
-                            .strokeBorder(Theme.Palette.hairline, lineWidth: 1)
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .strokeBorder(Theme.Palette.outlineVariant.opacity(0.9), lineWidth: 1)
                     )
+                    .shadow(color: Theme.Shadow.ambient.opacity(0.28), radius: 8, y: 4)
                 }
             }
 
-            HStack {
-                HStack(spacing: 8) {
-                    Image(systemName: "heart.fill").foregroundStyle(Theme.Palette.coral).font(.system(size: 11))
-                    Text("From Health").eyebrowStyle()
+            Button {
+                Haptics.tap()
+                Task {
+                    if appleHealth.isConnected {
+                        await appleHealth.refreshIfNeeded(force: true)
+                    } else {
+                        await appleHealth.requestAccess()
+                    }
                 }
-                Spacer()
-                Text("Steps 6,420 · Sleep 7h 12m")
-                    .font(Theme.Font.body(13))
-                    .foregroundStyle(Theme.Palette.inkSoft)
-                StatusChip(text: "On track", kind: .done)
+            } label: {
+                HStack(spacing: 12) {
+                    HStack(spacing: 8) {
+                        ZStack {
+                            Circle()
+                                .fill(Theme.Palette.secondaryFixed)
+                                .frame(width: 24, height: 24)
+                            Image(systemName: "heart.fill")
+                                .foregroundStyle(Theme.Palette.coralDeep)
+                                .font(.system(size: 10, weight: .semibold))
+                        }
+                        Text("From Health")
+                            .eyebrowStyle()
+                    }
+
+                    Spacer(minLength: 8)
+
+                    Text(healthSummaryText)
+                        .font(Theme.Font.body(13, weight: .medium))
+                        .foregroundStyle(Theme.Palette.inkSoft)
+                        .multilineTextAlignment(.trailing)
+
+                    if appleHealth.isLoading {
+                        ProgressView()
+                            .tint(Theme.Palette.primary)
+                    } else {
+                        StatusChip(text: healthStatusText, kind: healthStatusKind)
+                    }
+                }
+                .padding(.horizontal, Theme.Space.md)
+                .padding(.vertical, 14)
+                .background(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .fill(Theme.Palette.surfaceContainerLow)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .strokeBorder(Theme.Palette.outlineVariant.opacity(0.9), lineWidth: 1)
+                )
+                .shadow(color: Theme.Shadow.ambient.opacity(0.22), radius: 8, y: 4)
             }
-            .padding(Theme.Space.sm)
-            .background(
-                RoundedRectangle(cornerRadius: Theme.Radius.sm, style: .continuous)
-                    .fill(Theme.Palette.paperSoft)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.Radius.sm, style: .continuous)
-                    .strokeBorder(Theme.Palette.hairline, lineWidth: 1)
-            )
+            .buttonStyle(.plain)
+            .disabled(!appleHealth.isAvailable)
+        }
+    }
+
+    private var stepsValue: String {
+        appleHealth.isConnected ? appleHealth.snapshot.stepsText : "6,420"
+    }
+
+    private var sleepValue: String {
+        appleHealth.isConnected ? appleHealth.snapshot.sleepText : "7h 12m"
+    }
+
+    private var waterValue: String {
+        appleHealth.isConnected ? appleHealth.snapshot.waterGoalText : "3/8"
+    }
+
+    private var stepsProgress: Double {
+        appleHealth.isConnected ? appleHealth.snapshot.stepsProgress : 0.64
+    }
+
+    private var sleepProgress: Double {
+        appleHealth.isConnected ? appleHealth.snapshot.sleepProgress : 0.9
+    }
+
+    private var waterProgress: Double {
+        appleHealth.isConnected ? appleHealth.snapshot.waterProgress : 0.375
+    }
+
+    private var healthSummaryText: String {
+        switch appleHealth.syncState {
+        case .unavailable:
+            return "Apple Health isn't available on this device."
+        case .disconnected:
+            return "Connect Apple Health for live steps, sleep, and hydration."
+        case .syncing:
+            return "Pulling in your latest Apple Health summary now."
+        case .waitingForData:
+            return "Apple Health is connected. Your latest samples will appear here as they sync."
+        case .connected:
+            return "Steps \(appleHealth.snapshot.stepsText) · Sleep \(appleHealth.snapshot.sleepText) · Water \(appleHealth.snapshot.waterGoalText)"
+        }
+    }
+
+    private var healthStatusText: String {
+        switch appleHealth.syncState {
+        case .unavailable: "Unavailable"
+        case .disconnected: "Connect"
+        case .syncing: "Syncing"
+        case .waitingForData: "Linked"
+        case .connected: "Live"
+        }
+    }
+
+    private var healthStatusKind: StatusChip.Kind {
+        switch appleHealth.syncState {
+        case .connected: .done
+        case .waitingForData: .ask
+        case .disconnected: .ask
+        case .syncing: .ask
+        case .unavailable: .later
         }
     }
 
@@ -223,13 +348,6 @@ struct HomeView: View {
         case .later: StatusChip(text: "Later", kind: .later)
         }
     }
-
-    // MARK: Ask bar card
-
-    private var askBarCard: some View {
-        AskBar(placeholder: "Ask about your health…")
-    }
-
     private func isToday(_ date: Date) -> Bool {
         Calendar.current.isDateInToday(date)
     }
@@ -238,6 +356,7 @@ struct HomeView: View {
 #Preview {
     HomeView()
         .modelContainer(previewContainer())
+        .environmentObject(AppleHealthStore.previewConnected)
 }
 
 @MainActor

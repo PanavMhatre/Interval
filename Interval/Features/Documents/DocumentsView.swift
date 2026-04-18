@@ -13,6 +13,43 @@ struct DocumentsView: View {
     @State private var stage: PipelineStage = .idle
     @State private var justAddedID: PersistentIdentifier?
     @State private var activeSheet: DocumentSheet?
+    @State private var searchText = ""
+    @State private var selectedFilter: DocumentFilter = .all
+
+    enum DocumentFilter: String, CaseIterable, Identifiable {
+        case all
+        case flagged
+        case labs
+        case prescriptions
+        case visits
+
+        var id: String { rawValue }
+
+        var label: String {
+            switch self {
+            case .all: "All"
+            case .flagged: "Flagged"
+            case .labs: "Labs"
+            case .prescriptions: "Rx"
+            case .visits: "Visits"
+            }
+        }
+
+        func matches(_ document: MedicalDocument) -> Bool {
+            switch self {
+            case .all:
+                return true
+            case .flagged:
+                return document.flagged
+            case .labs:
+                return document.kind == .labPanel
+            case .prescriptions:
+                return document.kind == .prescription
+            case .visits:
+                return document.kind == .visitNote
+            }
+        }
+    }
 
     enum DocumentSheet: Identifiable {
         case preview(UIImage)
@@ -43,6 +80,34 @@ struct DocumentsView: View {
         }
     }
 
+    private var visibleDocuments: [MedicalDocument] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        return documents.filter { document in
+            selectedFilter.matches(document) && (query.isEmpty || matchesSearch(document, query: query))
+        }
+    }
+
+    private var flaggedDocuments: [MedicalDocument] {
+        visibleDocuments.filter(\.flagged)
+    }
+
+    private var datedSections: [(title: String, documents: [MedicalDocument])] {
+        var sections: [(title: String, documents: [MedicalDocument])] = []
+
+        for document in visibleDocuments where !document.flagged {
+            let title = monthSectionTitle(for: document.capturedAt)
+
+            if let existingIndex = sections.firstIndex(where: { $0.title == title }) {
+                sections[existingIndex].documents.append(document)
+            } else {
+                sections.append((title: title, documents: [document]))
+            }
+        }
+
+        return sections
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.lg) {
@@ -52,24 +117,35 @@ struct DocumentsView: View {
                     subtitle: "Every lab, prescription, and visit note — in one place."
                 )
 
+                libraryToolsCard
                 scanCard
 
-                ForEach(documents, id: \.persistentModelID) { doc in
-                    documentCard(doc)
-                        .transition(.asymmetric(insertion: .scale(scale: 0.96).combined(with: .opacity), removal: .opacity))
-                        .overlay(
-                            justAddedID == doc.persistentModelID ?
-                                RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
-                                    .stroke(Theme.Palette.coral, lineWidth: 2)
-                                    .allowsHitTesting(false)
-                                : nil
+                if visibleDocuments.isEmpty {
+                    emptySearchState
+                } else {
+                    if !flaggedDocuments.isEmpty {
+                        recordsSection(
+                            title: "Needs attention",
+                            subtitle: "\(flaggedDocuments.count) flagged record" + (flaggedDocuments.count == 1 ? "" : "s"),
+                            items: flaggedDocuments
                         )
+                    }
+
+                    ForEach(datedSections, id: \.title) { section in
+                        recordsSection(
+                            title: section.title,
+                            subtitle: "\(section.documents.count) document" + (section.documents.count == 1 ? "" : "s"),
+                            items: section.documents
+                        )
+                    }
                 }
             }
             .padding(.horizontal, Theme.Space.lg)
             .padding(.top, Theme.Space.md)
             .padding(.bottom, Theme.Space.xl)
             .animation(.smooth, value: documents.count)
+            .animation(.smooth, value: searchText)
+            .animation(.smooth, value: selectedFilter)
         }
         .background(Theme.Palette.paper)
         .overlay {
@@ -128,6 +204,113 @@ struct DocumentsView: View {
     }
 
     // MARK: Scan entry card
+
+    private var libraryToolsCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.Palette.coralDeep)
+
+                TextField(
+                    "",
+                    text: $searchText,
+                    prompt: Text("Search title, doctor, lab, or summary")
+                        .foregroundStyle(Theme.Palette.inkMuted)
+                )
+                .font(Theme.Font.body(15, weight: .medium))
+                .foregroundStyle(Theme.Palette.ink)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+
+                if !searchText.isEmpty {
+                    Button {
+                        Haptics.select()
+                        searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Theme.Palette.inkMuted)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Theme.Palette.surfaceContainerLowest)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(Theme.Palette.outlineVariant, lineWidth: 1)
+            )
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(DocumentFilter.allCases) { filter in
+                        filterChip(filter)
+                    }
+                }
+                .padding(.horizontal, 1)
+            }
+
+            Text(librarySummaryLine)
+                .font(Theme.Font.body(12, weight: .medium))
+                .foregroundStyle(Theme.Palette.inkSoft)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 2)
+        }
+        .padding(Theme.Space.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
+                .fill(Theme.Palette.surfaceContainerLow)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
+                .strokeBorder(Theme.Palette.outlineVariant, lineWidth: 1)
+        )
+        .shadow(color: Theme.Shadow.ambient.opacity(0.26), radius: 10, y: 5)
+    }
+
+    private func filterChip(_ filter: DocumentFilter) -> some View {
+        let selected = selectedFilter == filter
+
+        return Button {
+            Haptics.select()
+            withAnimation(.smooth(duration: 0.2)) {
+                selectedFilter = filter
+            }
+        } label: {
+            Text(filter.label)
+                .font(Theme.Font.body(12, weight: .semibold))
+                .foregroundStyle(selected ? Theme.Palette.onPrimary : Theme.Palette.ink)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(
+                    Capsule()
+                        .fill(selected ? Theme.Palette.primary : Theme.Palette.surfaceContainerLowest)
+                )
+                .overlay(
+                    Capsule()
+                        .strokeBorder(selected ? Theme.Palette.primary : Theme.Palette.outlineVariant, lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var librarySummaryLine: String {
+        if visibleDocuments.isEmpty {
+            return "No matching records right now."
+        }
+
+        if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && selectedFilter == .all {
+            return "\(documents.count) records across labs, prescriptions, and visit notes."
+        }
+
+        return "\(visibleDocuments.count) matching record" + (visibleDocuments.count == 1 ? "" : "s") + " shown."
+    }
 
     private var scanCard: some View {
         Button {
@@ -218,6 +401,57 @@ struct DocumentsView: View {
 
     // MARK: Document card
 
+    private func recordsSection(title: String, subtitle: String, items: [MedicalDocument]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(title)
+                    .font(Theme.Font.body(18, weight: .semibold))
+                    .foregroundStyle(Theme.Palette.ink)
+
+                Spacer()
+
+                Text(subtitle.uppercased())
+                    .font(Theme.Font.body(10, weight: .semibold))
+                    .tracking(0.7)
+                    .foregroundStyle(Theme.Palette.inkMuted)
+            }
+
+            ForEach(items, id: \.persistentModelID) { doc in
+                documentCard(doc)
+                    .transition(.asymmetric(insertion: .scale(scale: 0.96).combined(with: .opacity), removal: .opacity))
+                    .overlay(
+                        justAddedID == doc.persistentModelID ?
+                            RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
+                                .stroke(Theme.Palette.coral, lineWidth: 2)
+                                .allowsHitTesting(false)
+                            : nil
+                    )
+            }
+        }
+    }
+
+    private var emptySearchState: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("No records found")
+                .font(Theme.Font.display(24, weight: .bold))
+                .foregroundStyle(Theme.Palette.ink)
+
+            Text("Try a different search, switch filters, or scan a new record.")
+                .font(Theme.Font.body(14, weight: .medium))
+                .foregroundStyle(Theme.Palette.inkSoft)
+        }
+        .padding(Theme.Space.lg)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
+                .fill(Theme.Palette.surfaceContainerLow)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
+                .strokeBorder(Theme.Palette.outlineVariant, lineWidth: 1)
+        )
+    }
+
     private func documentCard(_ doc: MedicalDocument) -> some View {
         Button {
             Haptics.tap()
@@ -225,14 +459,7 @@ struct DocumentsView: View {
         } label: {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 12) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(doc.flagged ? Theme.Palette.peachTint : Theme.Palette.paperSoft)
-                        .frame(width: 38, height: 38)
-                    Image(systemName: doc.kind.iconName)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(doc.flagged ? Theme.Palette.coralDeep : Theme.Palette.ink)
-                }
+                documentLeadingVisual(doc)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack {
                         Text(doc.title)
@@ -287,6 +514,52 @@ struct DocumentsView: View {
         .softCard()
         } // end Button label
         .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func documentLeadingVisual(_ doc: MedicalDocument) -> some View {
+        if let data = doc.imageData, let image = UIImage(data: data) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 52, height: 68)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Theme.Palette.outlineVariant.opacity(0.9), lineWidth: 1)
+                )
+        } else {
+            ZStack {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(doc.flagged ? Theme.Palette.peachTint : Theme.Palette.paperSoft)
+                    .frame(width: 42, height: 42)
+                Image(systemName: doc.kind.iconName)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(doc.flagged ? Theme.Palette.coralDeep : Theme.Palette.ink)
+            }
+        }
+    }
+
+    private func matchesSearch(_ document: MedicalDocument, query: String) -> Bool {
+        let resultText = document.results
+            .map { "\($0.metric) \($0.valueText) \($0.status.displayName)" }
+            .joined(separator: " ")
+
+        let haystack = [
+            document.title,
+            document.provider ?? "",
+            document.summary,
+            document.kind.displayName,
+            resultText
+        ]
+        .joined(separator: " ")
+        .lowercased()
+
+        return haystack.contains(query)
+    }
+
+    private func monthSectionTitle(for date: Date) -> String {
+        date.formatted(.dateTime.month(.wide).year())
     }
 
     @ViewBuilder

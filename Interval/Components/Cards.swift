@@ -6,25 +6,25 @@ struct InsightCard: View {
     var eyebrow: String
     var title: String
     var detail: String
-    var accent: Color = Theme.Palette.coral
-    var background: Color = Theme.Palette.peachTint
+    var accent: Color = Theme.Palette.primary
+    var background: Color = Theme.Palette.surfaceContainerLow
     var badge: String? = nil
     var onPrimary: (() -> Void)? = nil
     var primaryLabel: String = "Tell me more"
     var onDismiss: (() -> Void)? = nil
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 14) {
             HStack {
                 HStack(spacing: 6) {
                     Text(eyebrow.uppercased())
                         .font(Theme.Font.body(10, weight: .semibold))
                         .tracking(0.6)
                         .foregroundStyle(accent)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Capsule().fill(Color.white.opacity(0.7)))
-                        .overlay(Capsule().strokeBorder(accent.opacity(0.3), lineWidth: 1))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(Theme.Palette.surfaceContainerLowest))
+                        .overlay(Capsule().strokeBorder(accent.opacity(0.18), lineWidth: 1))
                 }
                 Spacer()
                 if let badge {
@@ -35,7 +35,7 @@ struct InsightCard: View {
                 }
             }
             Text(title)
-                .font(Theme.Font.body(16, weight: .semibold))
+                .font(Theme.Font.body(18, weight: .semibold))
                 .foregroundStyle(Theme.Palette.ink)
                 .multilineTextAlignment(.leading)
             Text(detail)
@@ -51,11 +51,11 @@ struct InsightCard: View {
                         }) {
                             Text(primaryLabel)
                                 .font(Theme.Font.body(13, weight: .semibold))
-                                .foregroundStyle(Theme.Palette.ink)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 7)
-                                .background(Capsule().fill(Color.white))
-                                .overlay(Capsule().strokeBorder(Theme.Palette.ink.opacity(0.7), lineWidth: 1))
+                                .foregroundStyle(Theme.Palette.primary)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 10)
+                                .background(Capsule().fill(Theme.Palette.primaryFixed))
+                                .overlay(Capsule().strokeBorder(Theme.Palette.primaryFixedDim.opacity(0.7), lineWidth: 1))
                         }
                         .buttonStyle(.plain)
                     }
@@ -67,10 +67,10 @@ struct InsightCard: View {
                             Text("Dismiss")
                                 .font(Theme.Font.body(13, weight: .semibold))
                                 .foregroundStyle(Theme.Palette.inkMuted)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 7)
-                                .background(Capsule().fill(Color.white.opacity(0.5)))
-                                .overlay(Capsule().strokeBorder(Theme.Palette.hairline, lineWidth: 1))
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 10)
+                                .background(Capsule().fill(Theme.Palette.surfaceContainerHighest))
+                                .overlay(Capsule().strokeBorder(Theme.Palette.outlineVariant, lineWidth: 1))
                         }
                         .buttonStyle(.plain)
                     }
@@ -78,16 +78,18 @@ struct InsightCard: View {
                 .padding(.top, 2)
             }
         }
-        .padding(Theme.Space.md)
+        .padding(Theme.Space.lg)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
+            RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
                 .fill(background)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
-                .strokeBorder(accent.opacity(0.35), lineWidth: 1)
+            RoundedRectangle(cornerRadius: Theme.Radius.lg, style: .continuous)
+                .strokeBorder(Theme.Palette.outlineVariant.opacity(0.8), lineWidth: 1)
         )
+        .shadow(color: Theme.Shadow.ambient.opacity(0.8), radius: 16, y: 10)
+        .shadow(color: Theme.Shadow.warm.opacity(0.3), radius: 6, y: 2)
     }
 }
 
@@ -98,42 +100,59 @@ struct HealthStatTile: View {
     var value: String
     var progress: Double
     var icon: String
-    var tint: Color = Theme.Palette.coral
+    var tint: Color = Theme.Palette.primary
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(tint)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                ZStack {
+                    Circle()
+                        .fill(tint.opacity(0.14))
+                        .frame(width: 22, height: 22)
+
+                    Image(systemName: icon)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(tint)
+                }
                 Text(label.uppercased())
                     .font(Theme.Font.body(10, weight: .semibold))
-                    .tracking(0.6)
+                    .tracking(0.7)
                     .foregroundStyle(Theme.Palette.inkMuted)
             }
             Text(value)
                 .font(Theme.Font.body(18, weight: .semibold))
                 .foregroundStyle(Theme.Palette.ink)
-            Capsule().fill(Theme.Palette.paperSoft)
-                .frame(height: 6)
+            Capsule()
+                .fill(Theme.Palette.surfaceContainer)
+                .frame(height: 7)
                 .overlay(
                     GeometryReader { geo in
-                        Capsule().fill(tint)
+                        Capsule()
+                            .fill(
+                                LinearGradient(
+                                    colors: [Theme.Palette.tertiaryFixed, tint],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
                             .frame(width: geo.size.width * max(0, min(1, progress)))
                     }
                 )
-                .frame(height: 6)
+                .frame(height: 7)
         }
-        .padding(Theme.Space.sm)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: Theme.Radius.sm, style: .continuous)
-                .fill(Theme.Palette.card)
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(Theme.Palette.surfaceContainerLowest)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: Theme.Radius.sm, style: .continuous)
-                .strokeBorder(Theme.Palette.hairline, lineWidth: 1)
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .strokeBorder(Theme.Palette.outlineVariant.opacity(0.9), lineWidth: 1)
         )
+        .shadow(color: Theme.Shadow.ambient.opacity(0.45), radius: 12, y: 6)
+        .shadow(color: Theme.Shadow.warm.opacity(0.18), radius: 4, y: 2)
     }
 }
 
@@ -193,6 +212,7 @@ struct LabeledRow<Trailing: View>: View {
             RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
                 .strokeBorder(Theme.Palette.hairline, lineWidth: 1)
         )
+        .shadow(color: Theme.Shadow.ambient.opacity(0.45), radius: 10, y: 5)
     }
 }
 
@@ -210,7 +230,7 @@ struct SectionHeader: View {
                 Text(eyebrow.uppercased())
                     .font(Theme.Font.eyebrow)
                     .tracking(1.1)
-                    .foregroundStyle(Theme.Palette.inkMuted)
+                    .foregroundStyle(Theme.Palette.primary)
             }
             HStack(alignment: .firstTextBaseline) {
                 Text(title)
@@ -238,11 +258,11 @@ struct AskBar: View {
     var body: some View {
         HStack(spacing: 10) {
             ZStack {
-                Circle().fill(Theme.Palette.peachTint)
-                    .frame(width: 26, height: 26)
+                Circle().fill(Theme.Palette.primaryFixed)
+                    .frame(width: 32, height: 32)
                 Text("i")
-                    .font(Theme.Font.display(14, weight: .semibold))
-                    .foregroundStyle(Theme.Palette.coralDeep)
+                    .font(Theme.Font.display(16, weight: .semibold))
+                    .foregroundStyle(Theme.Palette.primary)
             }
             TextField(
                 "",
@@ -252,7 +272,7 @@ struct AskBar: View {
             )
                 .font(Theme.Font.bodyText)
                 .foregroundStyle(Theme.Palette.ink)
-                .tint(Theme.Palette.coralDeep)
+                .tint(Theme.Palette.secondary)
                 .submitLabel(.send)
                 .onSubmit {
                     guard !text.isEmpty else { return }
@@ -265,17 +285,19 @@ struct AskBar: View {
                 .foregroundStyle(Theme.Palette.inkMuted)
         }
         .padding(.horizontal, Theme.Space.md)
-        .padding(.vertical, 12)
+        .padding(.vertical, 14)
         .background(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(Theme.Palette.card)
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .fill(Theme.Palette.surfaceContainerLowest)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
                 .strokeBorder(
-                    Theme.Palette.ink.opacity(0.7),
-                    style: StrokeStyle(lineWidth: 1.2, dash: [5, 4])
+                    Theme.Palette.outlineVariant,
+                    lineWidth: 1
                 )
         )
+        .shadow(color: Theme.Shadow.ambient.opacity(0.45), radius: 12, y: 7)
+        .shadow(color: Theme.Shadow.warm.opacity(0.18), radius: 4, y: 2)
     }
 }

@@ -3,6 +3,7 @@ import SwiftData
 
 struct OnboardingView: View {
     @Environment(\.modelContext) private var context
+    @EnvironmentObject private var appleHealth: AppleHealthStore
     @Query private var profiles: [UserProfile]
 
     @State private var step: Int = 0
@@ -11,6 +12,7 @@ struct OnboardingView: View {
     @State private var notifications: PermissionState = .ask
     @State private var cloudAI: PermissionState = .skip
     @State private var userName: String = ""
+    @State private var isFinishing = false
 
     enum PermissionState: String { case on, ask, skip }
 
@@ -135,7 +137,7 @@ struct OnboardingView: View {
             VStack(spacing: 10) {
                 permissionRow(
                     title: "HealthKit",
-                    detail: "Steps, sleep, heart rate",
+                    detail: "Steps, sleep, hydration, heart rate",
                     icon: "heart.fill",
                     binding: $healthKit
                 )
@@ -275,7 +277,9 @@ struct OnboardingView: View {
                         .submitLabel(.done)
                         .onSubmit {
                             Haptics.tap()
-                            finishOnboarding()
+                            Task {
+                                await finishOnboarding(requestHealthAccess: healthKit == .on)
+                            }
                         }
                 }
             } else {
@@ -290,7 +294,7 @@ struct OnboardingView: View {
                 }
 
                 chatBubble(isUser: false) {
-                    Text("Nice to meet you, \(userName). Want me to read Health data from your Apple Watch?")
+                    Text("Nice to meet you, \(userName). Want me to connect Apple Health for live steps, sleep, hydration, and heart rate?")
                         .font(Theme.Font.bodyText)
                         .foregroundStyle(Theme.Palette.ink)
                 }
@@ -298,8 +302,16 @@ struct OnboardingView: View {
                 HStack {
                     Spacer()
                     HStack(spacing: 8) {
-                        choiceBubble("Sure") { finishOnboarding() }
-                        choiceBubble("Not yet") { finishOnboarding() }
+                        choiceBubble("Sure") {
+                            Task {
+                                await finishOnboarding(requestHealthAccess: healthKit != .skip)
+                            }
+                        }
+                        choiceBubble("Not yet") {
+                            Task {
+                                await finishOnboarding(requestHealthAccess: false)
+                            }
+                        }
                     }
                 }
             }
@@ -360,7 +372,14 @@ struct OnboardingView: View {
 
     // MARK: Finish
 
-    private func finishOnboarding() {
+    private func finishOnboarding(requestHealthAccess: Bool) async {
+        guard !isFinishing else { return }
+        isFinishing = true
+
+        if requestHealthAccess {
+            await appleHealth.requestAccess()
+        }
+
         Haptics.success()
         if let profile = profiles.first {
             if !userName.isEmpty {
@@ -377,10 +396,12 @@ struct OnboardingView: View {
             context.insert(p)
         }
         try? context.save()
+        isFinishing = false
     }
 }
 
 #Preview {
     OnboardingView()
         .modelContainer(for: [UserProfile.self], inMemory: true)
+        .environmentObject(AppleHealthStore.previewDisconnected)
 }

@@ -33,8 +33,8 @@ struct DashedHairline: View {
 
 struct PillTag: View {
     var text: String
-    var fill: Color = Theme.Palette.paperSoft
-    var border: Color = Theme.Palette.hairline
+    var fill: Color = Theme.Palette.surfaceContainerLow
+    var border: Color = Theme.Palette.outlineVariant
     var foreground: Color = Theme.Palette.ink
     var icon: String? = nil
 
@@ -45,16 +45,19 @@ struct PillTag: View {
             }
             Text(text)
                 .font(Theme.Font.caption)
+                .lineLimit(1)
         }
         .foregroundStyle(foreground)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .fixedSize(horizontal: true, vertical: false)
         .background(
             Capsule().fill(fill)
         )
         .overlay(
             Capsule().strokeBorder(border, lineWidth: 1)
         )
+        .shadow(color: Theme.Shadow.ambient.opacity(0.45), radius: 6, y: 3)
     }
 }
 
@@ -66,16 +69,17 @@ struct AvatarCircle: View {
 
     var body: some View {
         Circle()
-            .fill(Theme.Palette.peachTint)
+            .fill(Theme.Palette.primaryFixed)
             .overlay(
-                Circle().strokeBorder(Theme.Palette.coral.opacity(0.4), lineWidth: 1)
+                Circle().strokeBorder(Theme.Palette.outlineVariant.opacity(0.8), lineWidth: 1)
             )
             .frame(width: size, height: size)
             .overlay(
                 Text(initials)
                     .font(Theme.Font.body(size * 0.42, weight: .semibold))
-                    .foregroundStyle(Theme.Palette.coralDeep)
+                    .foregroundStyle(Theme.Palette.primary)
             )
+            .shadow(color: Theme.Shadow.warm.opacity(0.45), radius: 10, y: 5)
     }
 }
 
@@ -99,13 +103,13 @@ struct PrimaryButton: View {
                     Image(systemName: icon).font(.system(size: 14, weight: .bold))
                 }
             }
-            .foregroundStyle(.white)
+            .foregroundStyle(Theme.Palette.onPrimary)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 14)
+            .padding(.vertical, 16)
             .background(
-                Capsule().fill(enabled ? Theme.Palette.coral : Theme.Palette.inkMuted.opacity(0.4))
+                Capsule().fill(enabled ? Theme.Palette.primary : Theme.Palette.outline.opacity(0.28))
             )
-            .shadow(color: Theme.Palette.coral.opacity(enabled ? 0.22 : 0), radius: 10, y: 6)
+            .shadow(color: Theme.Shadow.warm.opacity(enabled ? 0.95 : 0), radius: 14, y: 8)
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
@@ -133,16 +137,17 @@ struct GhostButton: View {
             }
             .foregroundStyle(Theme.Palette.ink)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
+            .padding(.vertical, 13)
             .background(
-                Capsule().fill(Color.clear)
+                Capsule().fill(Theme.Palette.surfaceContainerLow)
             )
             .overlay(
                 Capsule().strokeBorder(
-                    Theme.Palette.ink,
+                    Theme.Palette.outline,
                     style: StrokeStyle(lineWidth: 1.5, dash: dashed ? [5, 4] : [])
                 )
             )
+            .shadow(color: Theme.Shadow.ambient.opacity(0.35), radius: 8, y: 4)
         }
         .buttonStyle(.plain)
     }
@@ -165,19 +170,20 @@ struct ScreenChipRow: View {
                         HStack(spacing: 6) {
                             Text(String(format: "%02d", idx + 1))
                                 .font(Theme.Font.mono(11, weight: .semibold))
-                                .foregroundStyle(selected == idx ? .white.opacity(0.8) : Theme.Palette.inkMuted)
+                                .foregroundStyle(selected == idx ? Theme.Palette.onPrimary.opacity(0.82) : Theme.Palette.inkMuted)
                             Text(chips[idx])
                                 .font(Theme.Font.display(14, weight: .semibold))
-                                .foregroundStyle(selected == idx ? .white : Theme.Palette.ink)
+                                .foregroundStyle(selected == idx ? Theme.Palette.onPrimary : Theme.Palette.ink)
                         }
                         .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
+                        .padding(.vertical, 9)
                         .background(
-                            Capsule().fill(selected == idx ? Theme.Palette.ink : Color.clear)
+                            Capsule().fill(selected == idx ? Theme.Palette.primary : Theme.Palette.surfaceContainerLow)
                         )
                         .overlay(
-                            Capsule().strokeBorder(Theme.Palette.ink.opacity(selected == idx ? 0 : 0.6), lineWidth: 1)
+                            Capsule().strokeBorder(Theme.Palette.outlineVariant.opacity(selected == idx ? 0 : 0.9), lineWidth: 1)
                         )
+                        .shadow(color: selected == idx ? Theme.Shadow.warm.opacity(0.65) : Theme.Shadow.ambient.opacity(0.25), radius: 8, y: 4)
                     }
                     .buttonStyle(.plain)
                 }
@@ -195,27 +201,30 @@ struct StatusChip: View {
         case done, now, later, newItem, warn, flag, skip, ask
         var fill: Color {
             switch self {
-            case .done: Theme.Palette.mint
-            case .now: Theme.Palette.peachTint
-            case .later: Theme.Palette.paperSoft
-            case .newItem: Theme.Palette.peachTint
-            case .warn: Theme.Palette.peachTint
-            case .flag: Theme.Palette.peachTint
-            case .skip: Theme.Palette.paperSoft
-            case .ask: Theme.Palette.peachTint
+            case .done: Theme.Palette.primaryFixed
+            case .now: Theme.Palette.secondaryFixed
+            case .later: Theme.Palette.surfaceContainerHigh
+            case .newItem: Theme.Palette.tertiaryFixed
+            case .warn: Theme.Palette.secondaryFixed
+            case .flag: Theme.Palette.errorContainer
+            case .skip: Theme.Palette.surfaceContainerHigh
+            case .ask: Theme.Palette.secondaryFixed
             }
         }
         var foreground: Color {
             switch self {
-            case .done: Theme.Palette.sageDeep
-            case .now, .newItem, .warn, .flag, .ask: Theme.Palette.coralDeep
+            case .done: Theme.Palette.primary
+            case .now, .warn, .ask: Theme.Palette.secondary
+            case .newItem: Theme.Palette.tertiary
+            case .flag: Theme.Palette.error
             case .later, .skip: Theme.Palette.inkMuted
             }
         }
         var border: Color {
             switch self {
-            case .done: Theme.Palette.sageDeep.opacity(0.3)
-            default: foreground.opacity(0.35)
+            case .done: Theme.Palette.primaryFixedDim.opacity(0.6)
+            case .newItem: Theme.Palette.tertiaryFixedDim.opacity(0.7)
+            default: foreground.opacity(0.22)
             }
         }
     }
@@ -228,8 +237,8 @@ struct StatusChip: View {
             .font(Theme.Font.body(10, weight: .semibold))
             .tracking(0.6)
             .foregroundStyle(kind.foreground)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 4)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
             .background(Capsule().fill(kind.fill))
             .overlay(Capsule().strokeBorder(kind.border, lineWidth: 1))
     }
@@ -241,8 +250,8 @@ struct ProgressRing: View {
     var progress: Double
     var size: CGFloat = 62
     var lineWidth: CGFloat = 6
-    var tint: Color = Theme.Palette.coral
-    var track: Color = Theme.Palette.peachTint
+    var tint: Color = Theme.Palette.primary
+    var track: Color = Theme.Palette.surfaceContainer
 
     var body: some View {
         ZStack {
