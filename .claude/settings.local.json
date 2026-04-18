@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:api.anthropic.com)",
+      "Bash(mkdir -p /tmp/interval-design)",
+      "Read(//tmp/**)",
+      "Bash(gunzip -c /Users/sjalkote/.claude/projects/-Users-sjalkote-Documents-Xcode-Interval/baef8ec4-4fe6-4ab6-a229-3796167c8941/tool-results/webfetch-1776540378730-ntu6c7.bin)",
+      "Read(//private/tmp/interval-design/**)",
+      "Bash(tar -xf extracted.bin)",
+      "mcp__axiom__axiom_search_skills",
+      "mcp__axiom__axiom_read_skill",
+      "mcp__axiom__axiom_get_catalog",
+      "mcp__XcodeBuildMCP__list_schemes",
+      "mcp__XcodeBuildMCP__list_sims",
+      "mcp__XcodeBuildMCP__session_set_defaults",
+      "mcp__XcodeBuildMCP__build_sim"
+    ]
+  }
+}

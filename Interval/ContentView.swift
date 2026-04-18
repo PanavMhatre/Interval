@@ -1,61 +1,66 @@
-//
-//  ContentView.swift
-//  Interval
-//
-//  Created by Sopan on 4/18/26.
-//
-
 import SwiftUI
 import SwiftData
 
 struct ContentView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
+    @Environment(\.modelContext) private var context
+    @Query private var profiles: [UserProfile]
+
+    @State private var selection: Tab = .home
+    @State private var didPrepareHaptics = false
+
+    enum Tab: Hashable {
+        case home, docs, meds, chat, profile
+    }
 
     var body: some View {
-        NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
-                    }
-                }
-                .onDelete(perform: deleteItems)
+        Group {
+            if let profile = profiles.first, profile.hasCompletedOnboarding {
+                mainTabs
+            } else {
+                OnboardingView()
+                    .transition(.opacity.combined(with: .move(edge: .trailing)))
             }
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
-                }
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
-                }
+        }
+        .animation(.smooth(duration: 0.45), value: profiles.first?.hasCompletedOnboarding)
+        .onAppear {
+            SampleData.seedIfNeeded(context)
+            if !didPrepareHaptics {
+                Haptics.prepareAll()
+                didPrepareHaptics = true
             }
-        } detail: {
-            Text("Select an item")
         }
     }
 
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
-        }
-    }
+    private var mainTabs: some View {
+        TabView(selection: $selection) {
+            NavigationStack { HomeView().navigationBarHidden(true) }
+                .tabItem { Label("Home",  systemImage: "house.fill") }
+                .tag(Tab.home)
 
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
-            }
+            NavigationStack { DocumentsView().navigationBarHidden(true) }
+                .tabItem { Label("Docs",  systemImage: "doc.text.fill") }
+                .tag(Tab.docs)
+
+            NavigationStack { MedicationsView().navigationBarHidden(true) }
+                .tabItem { Label("Meds",  systemImage: "pills.fill") }
+                .tag(Tab.meds)
+
+            NavigationStack { ChatView() }
+                .tabItem { Label("Chat",  systemImage: "bubble.left.and.bubble.right.fill") }
+                .tag(Tab.chat)
+
+            NavigationStack { ProfileView().navigationBarHidden(true) }
+                .tabItem { Label("Profile", systemImage: "person.crop.circle.fill") }
+                .tag(Tab.profile)
+        }
+        .tint(Theme.Palette.coralDeep)
+        .onChange(of: selection) { _, _ in
+            Haptics.select()
         }
     }
 }
 
-#Preview {
+#Preview("App entry") {
     ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
+        .modelContainer(previewContainer())
 }

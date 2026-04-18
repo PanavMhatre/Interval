@@ -1,10 +1,3 @@
-//
-//  IntervalApp.swift
-//  Interval
-//
-//  Created by Sopan on 4/18/26.
-//
-
 import SwiftUI
 import SwiftData
 
@@ -12,12 +5,16 @@ import SwiftData
 struct IntervalApp: App {
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
-            Item.self,
+            UserProfile.self,
+            Medication.self,
+            DoseLog.self,
+            MedicalDocument.self,
+            LabResult.self,
+            HealthInsight.self
         ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-
+        let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
         do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
+            return try ModelContainer(for: schema, configurations: [config])
         } catch {
             fatalError("Could not create ModelContainer: \(error)")
         }
