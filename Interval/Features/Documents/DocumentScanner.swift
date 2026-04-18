@@ -30,8 +30,8 @@ struct DocumentScanner: UIViewControllerRepresentable {
         }
 
         func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFinishWith scan: VNDocumentCameraScan) {
-            let images = (0..<scan.pageCount).map { scan.imageOfPage(at: $0) }
-            onComplete(images)
+            guard scan.pageCount > 0 else { onCancel(); return }
+            onComplete([scan.imageOfPage(at: 0)])
         }
 
         func documentCameraViewControllerDidCancel(_ controller: VNDocumentCameraViewController) {

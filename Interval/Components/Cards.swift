@@ -244,8 +244,15 @@ struct AskBar: View {
                     .font(Theme.Font.display(14, weight: .semibold))
                     .foregroundStyle(Theme.Palette.coralDeep)
             }
-            TextField(placeholder, text: $text)
+            TextField(
+                "",
+                text: $text,
+                prompt: Text(placeholder)
+                    .foregroundStyle(Theme.Palette.inkMuted)
+            )
                 .font(Theme.Font.bodyText)
+                .foregroundStyle(Theme.Palette.ink)
+                .tint(Theme.Palette.coralDeep)
                 .submitLabel(.send)
                 .onSubmit {
                     guard !text.isEmpty else { return }

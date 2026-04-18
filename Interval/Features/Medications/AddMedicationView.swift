@@ -73,8 +73,15 @@ struct AddMedicationView: View {
 
                 // Fields
                 fieldCard(label: "Name", prominent: true) {
-                    TextField("Medication name", text: $name)
+                    TextField(
+                        "",
+                        text: $name,
+                        prompt: Text("Medication name")
+                            .foregroundStyle(Theme.Palette.inkMuted)
+                    )
                         .font(Theme.Font.body(18, weight: .semibold))
+                        .foregroundStyle(Theme.Palette.ink)
+                        .tint(Theme.Palette.coralDeep)
                     Text("brand: \(brand)")
                         .font(Theme.Font.caption)
                         .foregroundStyle(Theme.Palette.inkMuted)
@@ -83,9 +90,16 @@ struct AddMedicationView: View {
                 HStack(spacing: 10) {
                     fieldCard(label: "Dose") {
                         HStack {
-                            TextField("0", text: $doseAmount)
+                            TextField(
+                                "",
+                                text: $doseAmount,
+                                prompt: Text("0")
+                                    .foregroundStyle(Theme.Palette.inkMuted)
+                            )
                                 .keyboardType(.numberPad)
                                 .font(Theme.Font.body(17, weight: .semibold))
+                                .foregroundStyle(Theme.Palette.ink)
+                                .tint(Theme.Palette.coralDeep)
                             Text(doseUnit).font(Theme.Font.body(13)).foregroundStyle(Theme.Palette.inkMuted)
                         }
                     }

@@ -131,7 +131,7 @@ extension DocumentAnalyzer {
     /// Persists an `ExtractedDocument` into SwiftData as a `MedicalDocument`
     /// with attached `LabResult`s. Returns the saved document.
     @discardableResult
-    func persist(_ extracted: ExtractedDocument, into context: ModelContext) -> MedicalDocument {
+    func persist(_ extracted: ExtractedDocument, imageData: Data? = nil, into context: ModelContext) -> MedicalDocument {
         let kind: DocumentKind = {
             switch extracted.kind.lowercased() {
             case "labpanel":     .labPanel
@@ -148,7 +148,8 @@ extension DocumentAnalyzer {
             provider: extracted.provider.isEmpty ? nil : extracted.provider,
             capturedAt: .now,
             summary: extracted.summary,
-            flagged: extracted.flagged
+            flagged: extracted.flagged,
+            imageData: imageData
         )
         context.insert(doc)
 

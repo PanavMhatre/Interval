@@ -200,8 +200,16 @@ struct ChatView: View {
         VStack(spacing: 0) {
             Divider().overlay(Theme.Palette.hairline)
             HStack(spacing: 10) {
-                TextField("Ask about your health…", text: $draft, axis: .vertical)
+                TextField(
+                    "",
+                    text: $draft,
+                    prompt: Text("Ask about your health…")
+                        .foregroundStyle(Theme.Palette.inkMuted),
+                    axis: .vertical
+                )
                     .font(Theme.Font.bodyText)
+                    .foregroundStyle(Theme.Palette.ink)
+                    .tint(Theme.Palette.coralDeep)
                     .focused($inputFocused)
                     .lineLimit(1...4)
                     .padding(.horizontal, 14)

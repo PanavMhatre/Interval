@@ -12,6 +12,18 @@ struct DocumentsView: View {
     @State private var pickedItem: PhotosPickerItem?
     @State private var stage: PipelineStage = .idle
     @State private var justAddedID: PersistentIdentifier?
+    @State private var activeSheet: DocumentSheet?
+
+    enum DocumentSheet: Identifiable {
+        case preview(UIImage)
+        case viewer(MedicalDocument)
+        var id: String {
+            switch self {
+            case .preview:        return "preview"
+            case .viewer(let d):  return "viewer-\(d.persistentModelID)"
+            }
+        }
+    }
 
     private let analyzer = DocumentAnalyzer()
 
@@ -68,7 +80,7 @@ struct DocumentsView: View {
             DocumentScanner(
                 onComplete: { images in
                     showScanner = false
-                    runPipeline(on: images)
+                    if let img = images.first { activeSheet = .preview(img) }
                 },
                 onCancel: {
                     showScanner = false
@@ -76,6 +88,24 @@ struct DocumentsView: View {
                 }
             )
             .ignoresSafeArea()
+        }
+        .sheet(item: $activeSheet) { sheet in
+            switch sheet {
+            case .preview(let img):
+                ScannedDocumentPreviewView(
+                    image: img,
+                    onUpload: { redacted in
+                        activeSheet = nil
+                        runPipeline(on: redacted)
+                    },
+                    onCancel: {
+                        activeSheet = nil
+                        stage = .idle
+                    }
+                )
+            case .viewer(let doc):
+                DocumentImageViewer(document: doc)
+            }
         }
         .photosPicker(
             isPresented: $showPhotoPicker,
@@ -88,7 +118,7 @@ struct DocumentsView: View {
             Task {
                 if let data = try? await item.loadTransferable(type: Data.self),
                    let image = UIImage(data: data) {
-                    runPipeline(on: [image])
+                    activeSheet = .preview(image)
                 } else {
                     stage = .error("Couldn't read that image.")
                 }
@@ -157,19 +187,18 @@ struct DocumentsView: View {
 
     // MARK: Pipeline
 
-    private func runPipeline(on images: [UIImage]) {
-        guard !images.isEmpty else { stage = .idle; return }
-
+    private func runPipeline(on image: UIImage) {
         Task {
             do {
                 stage = .reading
-                let text = try await TextRecognizer.recognize(images)
+                let text = try await TextRecognizer.recognize([image])
 
                 stage = .thinking
                 let extracted = try await analyzer.analyze(ocrText: text)
 
                 stage = .saving
-                let doc = analyzer.persist(extracted, into: context)
+                let imageData = image.jpegData(compressionQuality: 0.82)
+                let doc = analyzer.persist(extracted, imageData: imageData, into: context)
 
                 Haptics.success()
                 withAnimation(.smooth) {
@@ -190,6 +219,10 @@ struct DocumentsView: View {
     // MARK: Document card
 
     private func documentCard(_ doc: MedicalDocument) -> some View {
+        Button {
+            Haptics.tap()
+            activeSheet = .viewer(doc)
+        } label: {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 12) {
                 ZStack {
@@ -214,9 +247,16 @@ struct DocumentsView: View {
                         .foregroundStyle(Theme.Palette.inkMuted)
                 }
                 Spacer()
-                Text(doc.capturedAt.formatted(.dateTime.month(.abbreviated).day()))
-                    .font(Theme.Font.caption)
-                    .foregroundStyle(Theme.Palette.inkMuted)
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text(doc.capturedAt.formatted(.dateTime.month(.abbreviated).day()))
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(Theme.Palette.inkMuted)
+                    if doc.imageData != nil {
+                        Image(systemName: "doc.viewfinder")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Theme.Palette.coralDeep)
+                    }
+                }
             }
 
             if !doc.summary.isEmpty {
@@ -245,6 +285,8 @@ struct DocumentsView: View {
         }
         .padding(Theme.Space.md)
         .softCard()
+        } // end Button label
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder

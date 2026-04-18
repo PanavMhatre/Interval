@@ -32,6 +32,7 @@ final class MedicalDocument {
     var capturedAt: Date
     var summary: String
     var flagged: Bool
+    var imageData: Data?
 
     @Relationship(deleteRule: .cascade, inverse: \LabResult.document)
     var results: [LabResult] = []
@@ -42,7 +43,8 @@ final class MedicalDocument {
         provider: String? = nil,
         capturedAt: Date = .now,
         summary: String = "",
-        flagged: Bool = false
+        flagged: Bool = false,
+        imageData: Data? = nil
     ) {
         self.title = title
         self.kindRaw = kind.rawValue
@@ -50,6 +52,7 @@ final class MedicalDocument {
         self.capturedAt = capturedAt
         self.summary = summary
         self.flagged = flagged
+        self.imageData = imageData
     }
 
     var kind: DocumentKind { DocumentKind(rawValue: kindRaw) ?? .other }
