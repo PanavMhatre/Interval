@@ -1,8 +1,11 @@
 import SwiftUI
 import SwiftData
 import MessageUI
+import PhotosUI
+import UIKit
 
 struct ProfileView: View {
+    @Environment(\.modelContext) private var context
     @EnvironmentObject private var appleHealth: AppleHealthStore
     @Query private var profiles: [UserProfile]
     @Query(sort: [SortDescriptor(\Medication.createdAt)]) private var medications: [Medication]
@@ -12,8 +15,14 @@ struct ProfileView: View {
     @State private var selectedTrendTarget: TrendSheetTarget?
     @State private var selectedDocument: MedicalDocument?
     @State private var showingDoctorComposer = false
+    @State private var showingPhotoOptions = false
+    @State private var showingPhotoPicker = false
+    @State private var pickedPhotoItem: PhotosPickerItem?
+    @State private var photoErrorMessage: String?
 
     private var profile: UserProfile? { profiles.first }
+    private var hasProfilePhoto: Bool { profile?.profilePhotoData != nil }
+    private var photoActionTitle: String { hasProfilePhoto ? "Change photo" : "Add photo" }
 
     private var featuredLab: LabResult? {
         a1cLab ?? labs.first(where: { $0.status != .normal }) ?? labs.first
@@ -124,6 +133,40 @@ struct ProfileView: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
+        .confirmationDialog("Profile photo", isPresented: $showingPhotoOptions, titleVisibility: .visible) {
+            Button(photoActionTitle) {
+                showingPhotoPicker = true
+            }
+
+            if hasProfilePhoto {
+                Button("Remove photo", role: .destructive) {
+                    removeProfilePhoto()
+                }
+            }
+        }
+        .photosPicker(
+            isPresented: $showingPhotoPicker,
+            selection: $pickedPhotoItem,
+            matching: .images,
+            preferredItemEncoding: .automatic
+        )
+        .onChange(of: pickedPhotoItem) { _, newItem in
+            guard let newItem else { return }
+            Task {
+                await handleProfilePhotoSelection(newItem)
+            }
+        }
+        .alert(
+            "Couldn't update profile photo",
+            isPresented: Binding(
+                get: { photoErrorMessage != nil },
+                set: { if !$0 { photoErrorMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(photoErrorMessage ?? "Try another image.")
+        }
     }
 
     // MARK: Header
@@ -150,7 +193,33 @@ struct ProfileView: View {
 
                     Spacer()
 
-                    AvatarCircle(initials: profile?.initials ?? "?", size: 72)
+                    Button {
+                        Haptics.tap()
+                        showingPhotoOptions = true
+                    } label: {
+                        ZStack(alignment: .bottomTrailing) {
+                            AvatarCircle(
+                                initials: profile?.initials ?? "?",
+                                photoData: profile?.profilePhotoData,
+                                size: 72
+                            )
+
+                            Circle()
+                                .fill(Theme.Palette.surfaceContainerLowest)
+                                .frame(width: 24, height: 24)
+                                .overlay(
+                                    Image(systemName: "camera.fill")
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundStyle(Theme.Palette.coralDeep)
+                                )
+                                .overlay(
+                                    Circle()
+                                        .strokeBorder(Theme.Palette.outlineVariant, lineWidth: 1)
+                                )
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(photoActionTitle)
                 }
 
                 FlowLayout(spacing: 8) {
@@ -204,6 +273,68 @@ struct ProfileView: View {
 
     private var profileSummaryColumns: [GridItem] {
         [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)]
+    }
+
+    @MainActor
+    private func handleProfilePhotoSelection(_ item: PhotosPickerItem) async {
+        defer { pickedPhotoItem = nil }
+
+        do {
+            guard let data = try await item.loadTransferable(type: Data.self),
+                  let image = UIImage(data: data),
+                  let normalizedData = normalizedProfilePhotoData(from: image) else {
+                photoErrorMessage = "I couldn't read that image. Try a clearer photo."
+                return
+            }
+
+            updateProfilePhoto(with: normalizedData)
+        } catch {
+            photoErrorMessage = "I couldn't import that photo right now. Please try again."
+        }
+    }
+
+    @MainActor
+    private func updateProfilePhoto(with data: Data) {
+        guard let profile else {
+            photoErrorMessage = "Create your profile first, then add a photo."
+            return
+        }
+
+        profile.profilePhotoData = data
+        persistProfileChanges()
+    }
+
+    @MainActor
+    private func removeProfilePhoto() {
+        guard let profile else { return }
+        profile.profilePhotoData = nil
+        persistProfileChanges()
+    }
+
+    @MainActor
+    private func persistProfileChanges() {
+        do {
+            try context.save()
+        } catch {
+            photoErrorMessage = "The photo changed, but it couldn't be saved."
+        }
+    }
+
+    private func normalizedProfilePhotoData(from image: UIImage) -> Data? {
+        let maxDimension: CGFloat = 1200
+        let longestSide = max(image.size.width, image.size.height)
+        let scale = longestSide > maxDimension ? maxDimension / longestSide : 1
+        let targetSize = CGSize(
+            width: max(image.size.width * scale, 1),
+            height: max(image.size.height * scale, 1)
+        )
+
+        let renderer = UIGraphicsImageRenderer(size: targetSize)
+        let resizedImage = renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: targetSize))
+        }
+
+        return resizedImage.jpegData(compressionQuality: 0.82)
     }
 
     private func headerStat(title: String, value: String) -> some View {

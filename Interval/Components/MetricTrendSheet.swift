@@ -67,6 +67,7 @@ struct MetricTrendSheet: View {
                 VStack(alignment: .leading, spacing: Theme.Space.lg) {
                     if let current {
                         summaryHeader(current)
+                        aiExplanationCard
                         chartCard
                         statRow
                         resultTimeline
@@ -117,6 +118,39 @@ struct MetricTrendSheet: View {
                     .foregroundStyle(Theme.Palette.inkSoft)
             }
         }
+    }
+
+    private var aiExplanationCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.Palette.primary)
+                Text("Apple Intelligence explanation".uppercased())
+                    .font(Theme.Font.body(10, weight: .semibold))
+                    .tracking(0.8)
+                    .foregroundStyle(Theme.Palette.primary)
+            }
+
+            Text(aiExplanationTitle)
+                .font(Theme.Font.body(16, weight: .semibold))
+                .foregroundStyle(Theme.Palette.ink)
+
+            Text(aiExplanationBody)
+                .font(Theme.Font.body(14, weight: .medium))
+                .foregroundStyle(Theme.Palette.inkSoft)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(Theme.Space.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
+                .fill(Theme.Palette.paperSoft)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
+                .strokeBorder(Theme.Palette.outlineVariant, lineWidth: 1)
+        )
     }
 
     private var chartCard: some View {
@@ -388,6 +422,125 @@ struct MetricTrendSheet: View {
         }
         return String(format: "%.1f", value)
     }
+
+    private var aiExplanationTitle: String {
+        switch metricInfo.kind {
+        case .a1c:
+            return "What A1C measures"
+        case .vitaminD:
+            return "What vitamin D shows"
+        case .iron:
+            return "What iron means"
+        case .cholesterol:
+            return "What this cholesterol marker tracks"
+        case .thyroid:
+            return "What this thyroid marker means"
+        case .kidney:
+            return "What this kidney marker tracks"
+        case .bloodCount:
+            return "What this blood count shows"
+        case .glucose:
+            return "What this glucose result means"
+        case .vitaminB12:
+            return "What vitamin B12 supports"
+        case .generic:
+            return "What this lab is tracking"
+        }
+    }
+
+    private var aiExplanationBody: String {
+        metricInfo.description
+    }
+
+    private var metricInfo: MetricInfo {
+        let token = metricToken(metric)
+
+        if token.contains("a1c") || token.contains("hba1c") || token.contains("hemoglobina1c") {
+            return MetricInfo(
+                kind: .a1c,
+                description: "A1C estimates your average blood sugar over about the last 3 months, so it helps show longer-term glucose control instead of a single-day reading."
+            )
+        }
+
+        if token.contains("vitamind") || token == "25ohvitamind" || token.contains("25hydroxyvitamind") {
+            return MetricInfo(
+                kind: .vitaminD,
+                description: "Vitamin D helps with bone strength, muscle function, and immune support. This lab shows whether your level is low, in range, or higher than expected."
+            )
+        }
+
+        if token == "iron" || token.contains("serumiron") {
+            return MetricInfo(
+                kind: .iron,
+                description: "Iron helps your body make hemoglobin so oxygen can move through your blood. Low iron can happen even before anemia shows up clearly on other labs."
+            )
+        }
+
+        if token.contains("ldl") || token.contains("hdl") || token.contains("cholesterol") || token.contains("triglyceride") {
+            return MetricInfo(
+                kind: .cholesterol,
+                description: "This cholesterol-related marker helps show how fats are moving in your blood and can add context around heart and blood vessel risk over time."
+            )
+        }
+
+        if token.contains("tsh") || token.contains("thyroid") || token.contains("t4") || token.contains("t3") {
+            return MetricInfo(
+                kind: .thyroid,
+                description: "This thyroid marker helps show how your body is regulating energy, temperature, and metabolism. Trends can matter as much as a single value."
+            )
+        }
+
+        if token.contains("creatinine") || token.contains("egfr") || token.contains("bun") {
+            return MetricInfo(
+                kind: .kidney,
+                description: "This kidney marker helps show how well your kidneys are filtering and balancing waste, fluids, or electrolytes in your blood."
+            )
+        }
+
+        if token.contains("hemoglobin") || token.contains("hematocrit") || token.contains("rbc") || token.contains("wbc") || token.contains("platelet") {
+            return MetricInfo(
+                kind: .bloodCount,
+                description: "This blood-count marker helps show how your body is carrying oxygen, fighting infection, or clotting. It is usually interpreted alongside related blood count results."
+            )
+        }
+
+        if token.contains("glucose") {
+            return MetricInfo(
+                kind: .glucose,
+                description: "Glucose is the sugar your body uses for energy. This result reflects one moment in time, while its trend can show whether your levels are becoming more stable or drifting."
+            )
+        }
+
+        if token.contains("b12") || token.contains("vitaminb12") {
+            return MetricInfo(
+                kind: .vitaminB12,
+                description: "Vitamin B12 helps with nerve health and red blood cell production. Low levels can contribute to fatigue, numbness, or anemia-related symptoms."
+            )
+        }
+
+        return MetricInfo(
+            kind: .generic,
+            description: "\(metric) is one of your tracked lab markers. Use this trend to see how it is moving over time and compare it with the reference range shown for each result."
+        )
+    }
+}
+
+private struct MetricInfo {
+    let kind: MetricKind
+    let description: String
+}
+
+private enum MetricKind {
+    case a1c
+    case vitaminD
+    case iron
+    case cholesterol
+    case thyroid
+    case kidney
+    case bloodCount
+    case glucose
+    case vitaminB12
+    case generic
 }
 
 func metricToken(_ value: String) -> String {

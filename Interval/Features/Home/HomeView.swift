@@ -65,7 +65,11 @@ struct HomeView: View {
                 Haptics.tap()
                 onProfileTap?()
             } label: {
-                AvatarCircle(initials: profile?.initials ?? "?", size: 44)
+                AvatarCircle(
+                    initials: profile?.initials ?? "?",
+                    photoData: profile?.profilePhotoData,
+                    size: 44
+                )
             }
             .buttonStyle(.plain)
         }

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - Hairline
 
@@ -65,19 +66,28 @@ struct PillTag: View {
 
 struct AvatarCircle: View {
     var initials: String
+    var photoData: Data? = nil
     var size: CGFloat = 40
 
     var body: some View {
-        Circle()
-            .fill(Theme.Palette.primaryFixed)
-            .overlay(
-                Circle().strokeBorder(Theme.Palette.outlineVariant.opacity(0.8), lineWidth: 1)
-            )
-            .frame(width: size, height: size)
-            .overlay(
+        ZStack {
+            Circle()
+                .fill(Theme.Palette.primaryFixed)
+
+            if let photoData, let image = UIImage(data: photoData) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
                 Text(initials)
                     .font(Theme.Font.body(size * 0.42, weight: .semibold))
                     .foregroundStyle(Theme.Palette.primary)
+            }
+        }
+            .frame(width: size, height: size)
+            .clipShape(Circle())
+            .overlay(
+                Circle().strokeBorder(Theme.Palette.outlineVariant.opacity(0.8), lineWidth: 1)
             )
             .shadow(color: Theme.Shadow.warm.opacity(0.45), radius: 10, y: 5)
     }

@@ -5,6 +5,7 @@ import SwiftData
 final class UserProfile {
     var name: String
     var initials: String
+    @Attribute(.externalStorage) var profilePhotoData: Data?
     var age: Int
     var sex: String
     var bloodType: String
@@ -18,6 +19,7 @@ final class UserProfile {
     init(
         name: String = "Sarah K.",
         initials: String = "S",
+        profilePhotoData: Data? = nil,
         age: Int = 34,
         sex: String = "Female",
         bloodType: String = "O+",
@@ -30,6 +32,7 @@ final class UserProfile {
     ) {
         self.name = name
         self.initials = initials
+        self.profilePhotoData = profilePhotoData
         self.age = age
         self.sex = sex
         self.bloodType = bloodType
