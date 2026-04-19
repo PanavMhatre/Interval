@@ -1,0 +1,46 @@
+{
+  "fill" : {
+    "automatic-gradient" : "display-p3:0.97647,0.86667,0.77647,1.00000",
+    "orientation" : {
+      "start" : {
+        "x" : 0.5,
+        "y" : 0
+      },
+      "stop" : {
+        "x" : 0.5,
+        "y" : 0.7
+      }
+    }
+  },
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "image-name" : "Interval_AppIcon_1024-removebg-preview.png",
+          "name" : "Interval_AppIcon_1024-removebg-preview",
+          "position" : {
+            "scale" : 1.75,
+            "translation-in-points" : [
+              -0.875,
+              -86.625
+            ]
+          }
+        }
+      ],
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.5
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [
+      "watchOS"
+    ],
+    "squares" : "shared"
+  }
+}
