@@ -522,6 +522,10 @@ struct ChatView: View {
                 .foregroundStyle(Theme.Palette.ink)
                 .tint(Theme.Palette.coralDeep)
                 .focused($inputFocused)
+                .submitLabel(.send)
+                .onSubmit {
+                    submitDraft()
+                }
                 .lineLimit(1...4)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
@@ -530,7 +534,7 @@ struct ChatView: View {
                 .disabled(responding)
 
                 Button {
-                    send(draft)
+                    submitDraft()
                 } label: {
                     Image(systemName: responding ? "stop.fill" : "arrow.up")
                         .font(.system(size: 16, weight: .bold))
@@ -568,6 +572,11 @@ struct ChatView: View {
                 )]
             )
         ]
+    }
+
+    private func submitDraft() {
+        inputFocused = false
+        send(draft)
     }
 
     private func send(_ text: String) {
