@@ -1,7 +1,6 @@
 import SwiftUI
 import SwiftData
 import Foundation
-import FoundationModels
 
 struct ChatMessage: Identifiable, Hashable {
     enum Sender { case user, ai }
