@@ -168,12 +168,14 @@ struct ChatView: View {
             sourceDetailSheet(source)
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
+                .presentationBackground(Theme.Palette.paper)
         }
         // Medical disclaimer sheet
         .sheet(isPresented: $showMedicalDisclaimer) {
             medicalDisclaimerSheet
-                .presentationDetents([.fraction(0.45)])
+                .presentationDetents([.height(320)])
                 .presentationDragIndicator(.visible)
+                .presentationBackground(Theme.Palette.paper)
         }
     }
 
@@ -207,7 +209,7 @@ struct ChatView: View {
                             .tracking(1)
                             .foregroundStyle(Theme.Palette.inkMuted)
 
-                        Text(showingLoadedSummary ? "Hide the chart summary" : "Tap to review what chat is using")
+                        Text(showingLoadedSummary ? "Hide summary" : "Tap to review what chat is using")
                             .font(Theme.Font.body(13, weight: .medium))
                             .foregroundStyle(Theme.Palette.inkSoft)
                     }
@@ -312,16 +314,6 @@ struct ChatView: View {
                         .animation(.smooth(duration: 0.18), value: msg.text)
                 }
 
-                // ── Feature 2: Source chips ───────────────────────────────
-                if !msg.isStreaming && !msg.sources.isEmpty {
-                    sourceChipsRow(msg.sources)
-                }
-
-                // ── Feature 1: Disclaimer chip ────────────────────────────
-                if !msg.isStreaming {
-                    disclaimerChip
-                }
-
                 // ── Follow-up suggestion chips ────────────────────────────
                 if !msg.chips.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -352,6 +344,19 @@ struct ChatView: View {
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                // ── Feature 1: Disclaimer chip ────────────────────────────
+                if !msg.isStreaming {
+                    HStack {
+                        Spacer()
+                        disclaimerChip
+                    }
+                }
+
+                // ── Feature 2: Source chips ───────────────────────────────
+                if !msg.isStreaming && !msg.sources.isEmpty {
+                    sourceChipsRow(msg.sources)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -470,17 +475,21 @@ struct ChatView: View {
             Haptics.select()
             showMedicalDisclaimer = true
         } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "info.circle")
-                    .font(.system(size: 9, weight: .semibold))
-                Text("Not a substitute for medical advice")
-                    .font(Theme.Font.body(10, weight: .medium))
-            }
-            .foregroundStyle(Theme.Palette.inkMuted)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(Capsule().fill(Theme.Palette.surfaceContainerLow))
-            .overlay(Capsule().strokeBorder(Theme.Palette.outlineVariant.opacity(0.5), lineWidth: 1))
+            Image(systemName: "info.circle")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.Palette.ink)
+                .frame(width: 30, height: 30)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Theme.Palette.surfaceContainerLowest)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(Theme.Palette.outlineVariant, lineWidth: 1)
+                )
+                .shadow(color: Theme.Shadow.ambient.opacity(0.18), radius: 6, y: 3)
+                .accessibilityLabel("Medical disclaimer")
+                .accessibilityHint("Opens the medical disclaimer")
         }
         .buttonStyle(.plain)
     }
@@ -563,13 +572,7 @@ struct ChatView: View {
             ChatMessage(
                 sender: .ai,
                 text: "Hi \(firstName). I have your latest conditions, meds, and labs loaded.\n\nAsk me anything.",
-                chips: ["What does my A1C mean?", "Any risky meds?", "Am I low on iron?"],
-                sources: [ChatSource(
-                    label: "Your chart",
-                    icon: "doc.text.fill",
-                    accent: Theme.Palette.primary,
-                    deepLink: .aiInference
-                )]
+                chips: ["What does my A1C mean?", "Any risky meds?", "Am I low on iron?"]
             )
         ]
     }
@@ -722,7 +725,6 @@ struct ChatView: View {
 
     private func labDetailSheet(_ lab: LabResult) -> some View {
         VStack(alignment: .leading, spacing: 20) {
-            sheetHandle
             HStack(spacing: 14) {
                 ZStack {
                     Circle().fill(statusFill(for: lab.status)).frame(width: 48, height: 48)
@@ -789,7 +791,6 @@ struct ChatView: View {
 
     private func medicationDetailSheet(_ med: Medication) -> some View {
         VStack(alignment: .leading, spacing: 20) {
-            sheetHandle
             HStack(spacing: 14) {
                 ZStack {
                     Circle().fill(Theme.Palette.sage).frame(width: 48, height: 48)
@@ -835,7 +836,6 @@ struct ChatView: View {
 
     private var openFDASheet: some View {
         VStack(alignment: .leading, spacing: 20) {
-            sheetHandle
             HStack(spacing: 14) {
                 ZStack {
                     Circle().fill(Theme.Palette.tertiaryFixed).frame(width: 48, height: 48)
@@ -876,7 +876,6 @@ struct ChatView: View {
 
     private var medicalDisclaimerSheet: some View {
         VStack(alignment: .leading, spacing: 20) {
-            sheetHandle
             HStack(spacing: 12) {
                 Image(systemName: "cross.circle.fill")
                     .font(.system(size: 26))
@@ -895,17 +894,15 @@ struct ChatView: View {
                 .font(Theme.Font.body(15, weight: .medium))
                 .foregroundStyle(Theme.Palette.inkSoft)
                 .fixedSize(horizontal: false, vertical: true)
-
-            Spacer()
         }
         .padding(Theme.Space.lg)
+        .padding(.bottom, Theme.Space.md)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.Palette.paper)
     }
 
     private func genericSourceSheet(label: String, icon: String, accent: Color, body: String) -> some View {
         VStack(alignment: .leading, spacing: 20) {
-            sheetHandle
             HStack(spacing: 12) {
                 Image(systemName: icon).font(.system(size: 22)).foregroundStyle(accent)
                 Text(label).font(Theme.Font.display(20, weight: .bold)).foregroundStyle(Theme.Palette.ink)
@@ -916,13 +913,6 @@ struct ChatView: View {
         .padding(Theme.Space.lg)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.Palette.paper)
-    }
-
-    private var sheetHandle: some View {
-        Capsule()
-            .fill(Theme.Palette.hairline)
-            .frame(width: 36, height: 4)
-            .frame(maxWidth: .infinity)
     }
 
     private func detailRow(_ label: String, value: String) -> some View {
@@ -1430,7 +1420,7 @@ struct ChatView: View {
         if lower.contains("ibuprofen") || lower.contains("interact") || lower.contains("risky") {
             return "Ibuprofen with Lisinopril can put extra stress on your kidneys and may push blood pressure up.\n\nShort-term use is usually the safer case, but spacing it out, using the lowest dose, and staying hydrated is a better pattern to discuss with your clinician."
         }
-        return "Here is the quick picture from your chart: 3 active meds, A1C 6.2%, iron 52 ug/dL, and BP 128/82.\n\nTell me what you want to focus on and I will break it down clearly."
+        return "Here is the quick picture: 3 active meds, A1C 6.2%, iron 52 ug/dL, and BP 128/82.\n\nTell me what you want to focus on and I will break it down clearly."
     }
 }
 

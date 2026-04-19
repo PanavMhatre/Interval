@@ -22,6 +22,7 @@ struct MetricTrendSheet: View {
 
     private var current: LabResult? { metricLabs.last }
     private var previous: LabResult? { metricLabs.dropLast().last }
+    private var earliest: LabResult? { metricLabs.first }
 
     private var accent: Color {
         switch current?.status {
@@ -43,6 +44,21 @@ struct MetricTrendSheet: View {
         case nil:
             Theme.Palette.surfaceContainerLow
         }
+    }
+
+    private var yDomain: ClosedRange<Double> {
+        let values = metricLabs.map(\.value)
+        let lows = metricLabs.compactMap(\.referenceLow)
+        let highs = metricLabs.compactMap(\.referenceHigh)
+        let allValues = values + lows + highs
+
+        guard let minValue = allValues.min(), let maxValue = allValues.max() else {
+            return 0...1
+        }
+
+        let span = max(maxValue - minValue, 0.4)
+        let padding = span * 0.18
+        return (minValue - padding)...(maxValue + padding)
     }
 
     var body: some View {
@@ -110,6 +126,19 @@ struct MetricTrendSheet: View {
                 .foregroundStyle(Theme.Palette.ink)
 
             Chart {
+                if let firstDate = earliest?.capturedAt,
+                   let lastDate = current?.capturedAt,
+                   let low = current?.referenceLow,
+                   let high = current?.referenceHigh {
+                    RectangleMark(
+                        xStart: .value("Start", firstDate),
+                        xEnd: .value("End", lastDate),
+                        yStart: .value("Low Band", low),
+                        yEnd: .value("High Band", high)
+                    )
+                    .foregroundStyle(accentFill.opacity(0.22))
+                }
+
                 if let low = current?.referenceLow {
                     RuleMark(y: .value("Low", low))
                         .foregroundStyle(Theme.Palette.primary.opacity(0.4))
@@ -153,6 +182,7 @@ struct MetricTrendSheet: View {
             }
             .frame(height: 220)
             .chartLegend(.hidden)
+            .chartYScale(domain: yDomain)
             .chartYAxis {
                 AxisMarks(position: .leading)
             }
@@ -160,6 +190,11 @@ struct MetricTrendSheet: View {
                 AxisMarks(values: metricLabs.map(\.capturedAt)) { value in
                     AxisValueLabel(format: .dateTime.month(.abbreviated).day())
                 }
+            }
+            .chartPlotStyle { plot in
+                plot
+                    .background(Theme.Palette.surfaceContainerLow.opacity(0.35))
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
 
             Text(referenceCopy)
@@ -331,7 +366,7 @@ struct MetricTrendSheet: View {
             return "You have one result so far. The next result will make the trend more meaningful."
         }
 
-        return deltaText
+        return "\(deltaText) Based on \(metricLabs.count) recorded results."
     }
 
     private var deltaText: String {

@@ -5,6 +5,15 @@ import UIKit
 @MainActor
 enum SampleData {
 
+    private struct ShowcaseLabPayload {
+        let metric: String
+        let value: Double
+        let unit: String
+        let referenceLow: Double?
+        let referenceHigh: Double?
+        let status: LabStatus
+    }
+
     private struct ShowcaseDocumentPayload {
         let title: String
         let kind: DocumentKind
@@ -13,6 +22,7 @@ enum SampleData {
         let summary: String
         let flagged: Bool
         let lines: [String]
+        let labs: [ShowcaseLabPayload]
     }
 
     /// Seeds the container the very first time the app launches so every tab
@@ -74,52 +84,21 @@ enum SampleData {
         context.insert(DoseLog(medication: metformin,   scheduledFor: time(18))) // upcoming
 
         // Documents + labs
-        let showcase = showcaseDocumentPayloads(referenceDate: today, calendar: cal)
+        let showcaseDocuments = showcaseDocumentPayloads(referenceDate: today, calendar: cal)
 
-        let aprPanel = MedicalDocument(
-            title: showcase.apr.title,
-            kind: showcase.apr.kind,
-            provider: showcase.apr.provider,
-            capturedAt: showcase.apr.capturedAt,
-            summary: showcase.apr.summary,
-            flagged: showcase.apr.flagged,
-            imageData: makeShowcaseDocumentImageData(showcase.apr)
-        )
-        let febPanel = MedicalDocument(
-            title: showcase.feb.title,
-            kind: showcase.feb.kind,
-            provider: showcase.feb.provider,
-            capturedAt: showcase.feb.capturedAt,
-            summary: showcase.feb.summary,
-            flagged: showcase.feb.flagged,
-            imageData: makeShowcaseDocumentImageData(showcase.feb)
-        )
-        let physical = MedicalDocument(
-            title: showcase.physical.title,
-            kind: showcase.physical.kind,
-            provider: showcase.physical.provider,
-            capturedAt: showcase.physical.capturedAt,
-            summary: showcase.physical.summary,
-            flagged: showcase.physical.flagged,
-            imageData: makeShowcaseDocumentImageData(showcase.physical)
-        )
-        let prescription = MedicalDocument(
-            title: showcase.prescription.title,
-            kind: showcase.prescription.kind,
-            provider: showcase.prescription.provider,
-            capturedAt: showcase.prescription.capturedAt,
-            summary: showcase.prescription.summary,
-            flagged: showcase.prescription.flagged,
-            imageData: makeShowcaseDocumentImageData(showcase.prescription)
-        )
-        [aprPanel, febPanel, physical, prescription].forEach(context.insert)
-
-        // Lab results
-        context.insert(LabResult(document: aprPanel, metric: "A1C",  value: 6.2,  unit: "%",    referenceLow: 4.0, referenceHigh: 5.6, capturedAt: aprPanel.capturedAt, status: .high))
-        context.insert(LabResult(document: aprPanel, metric: "Iron", value: 52,   unit: "µg/dL", referenceLow: 60,  referenceHigh: 170, capturedAt: aprPanel.capturedAt, status: .low))
-        context.insert(LabResult(document: aprPanel, metric: "Vitamin D", value: 38, unit: "ng/mL", referenceLow: 30, referenceHigh: 100, capturedAt: aprPanel.capturedAt, status: .normal))
-        context.insert(LabResult(document: febPanel, metric: "Iron", value: 46,   unit: "µg/dL", referenceLow: 60,  referenceHigh: 170, capturedAt: febPanel.capturedAt, status: .low))
-        context.insert(LabResult(document: febPanel, metric: "A1C",  value: 5.9,  unit: "%",    referenceLow: 4.0, referenceHigh: 5.6, capturedAt: febPanel.capturedAt, status: .high))
+        for payload in showcaseDocuments {
+            let document = MedicalDocument(
+                title: payload.title,
+                kind: payload.kind,
+                provider: payload.provider,
+                capturedAt: payload.capturedAt,
+                summary: payload.summary,
+                flagged: payload.flagged,
+                imageData: makeShowcaseDocumentImageData(payload)
+            )
+            context.insert(document)
+            insertShowcaseLabs(for: document, payload: payload, context: context)
+        }
 
         // Insights
         context.insert(HealthInsight(
@@ -143,18 +122,15 @@ enum SampleData {
 
     private static func ensureShowcaseDocumentsIfNeeded(_ context: ModelContext) {
         let profiles = (try? context.fetch(FetchDescriptor<UserProfile>())) ?? []
-        guard let profile = profiles.first, isShowcaseProfile(profile) else { return }
-
         let documents = (try? context.fetch(FetchDescriptor<MedicalDocument>())) ?? []
-        let showcase = showcaseDocumentPayloads(referenceDate: .now, calendar: .current)
+        let labs = (try? context.fetch(FetchDescriptor<LabResult>())) ?? []
+        guard shouldBackfillShowcaseData(profile: profiles.first, documents: documents, labs: labs) else { return }
 
-        [
-            showcase.apr,
-            showcase.feb,
-            showcase.physical,
-            showcase.prescription
-        ].forEach { payload in
-            upsertShowcaseDocument(payload, existingDocuments: documents, context: context)
+        let showcaseDocuments = showcaseDocumentPayloads(referenceDate: .now, calendar: .current)
+
+        showcaseDocuments.forEach { payload in
+            let document = upsertShowcaseDocument(payload, existingDocuments: documents, context: context)
+            upsertShowcaseLabs(for: document, payload: payload, existingLabs: labs, context: context)
         }
 
         try? context.save()
@@ -237,47 +213,161 @@ enum SampleData {
         profile.name == "Sarah K." && profile.location == "Austin, TX"
     }
 
+    private static func shouldBackfillShowcaseData(
+        profile: UserProfile?,
+        documents: [MedicalDocument],
+        labs: [LabResult]
+    ) -> Bool {
+        if let profile, isShowcaseProfile(profile) {
+            return true
+        }
+
+        if documents.contains(where: isShowcaseDocument) {
+            return true
+        }
+
+        return labs.contains { result in
+            let token = metricToken(result.metric)
+            guard token == metricToken("A1C") || token == metricToken("Iron") || token == metricToken("Vitamin D") else {
+                return false
+            }
+
+            if let document = result.document, isShowcaseDocument(document) {
+                return true
+            }
+
+            return false
+        }
+    }
+
+    private static func isShowcaseDocument(_ document: MedicalDocument) -> Bool {
+        let provider = document.provider?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let title = document.title.lowercased()
+
+        if provider == "Dr. Patel" && title.contains("blood panel") {
+            return true
+        }
+
+        if provider == "Central Pharmacy" && title.contains("prescription") {
+            return true
+        }
+
+        return false
+    }
+
     private static func showcaseDocumentPayloads(
         referenceDate: Date,
         calendar: Calendar
-    ) -> (
-        apr: ShowcaseDocumentPayload,
-        feb: ShowcaseDocumentPayload,
-        physical: ShowcaseDocumentPayload,
-        prescription: ShowcaseDocumentPayload
-    ) {
+    ) -> [ShowcaseDocumentPayload] {
         let aprDate = dateAt(hour: 9, minute: 0, dayOffset: -1, referenceDate: referenceDate, calendar: calendar)
         let febDate = calendar.date(byAdding: .day, value: -66, to: referenceDate) ?? referenceDate
+        let decDate = calendar.date(byAdding: .day, value: -138, to: referenceDate) ?? referenceDate
+        let sepDate = calendar.date(byAdding: .day, value: -228, to: referenceDate) ?? referenceDate
+        let junDate = calendar.date(byAdding: .day, value: -320, to: referenceDate) ?? referenceDate
         let physicalDate = calendar.date(byAdding: .month, value: -3, to: referenceDate) ?? referenceDate
         let prescriptionDate = calendar.date(byAdding: .day, value: -14, to: referenceDate) ?? referenceDate
+
+        let latestLabs = [
+            ShowcaseLabPayload(metric: "A1C", value: 6.2, unit: "%", referenceLow: 4.0, referenceHigh: 5.6, status: .high),
+            ShowcaseLabPayload(metric: "Iron", value: 52, unit: "µg/dL", referenceLow: 60, referenceHigh: 170, status: .low),
+            ShowcaseLabPayload(metric: "Vitamin D", value: 38, unit: "ng/mL", referenceLow: 30, referenceHigh: 100, status: .normal)
+        ]
 
         let apr = ShowcaseDocumentPayload(
             title: "Blood panel — LabCorp",
             kind: .labPanel,
             provider: "Dr. Patel",
             capturedAt: aprDate,
-            summary: "Iron dipped; A1C flagged.",
+            summary: "A1C climbed again; iron is still low.",
             flagged: true,
             lines: [
                 "Comprehensive blood panel",
                 "A1C  6.2%   High",
                 "Iron  52 ug/dL   Low",
                 "Vitamin D  38 ng/mL   Normal"
-            ]
+            ],
+            labs: latestLabs
         )
+
+        let febLabs = [
+            ShowcaseLabPayload(metric: "A1C", value: 5.9, unit: "%", referenceLow: 4.0, referenceHigh: 5.6, status: .high),
+            ShowcaseLabPayload(metric: "Iron", value: 46, unit: "µg/dL", referenceLow: 60, referenceHigh: 170, status: .low),
+            ShowcaseLabPayload(metric: "Vitamin D", value: 34, unit: "ng/mL", referenceLow: 30, referenceHigh: 100, status: .normal)
+        ]
 
         let feb = ShowcaseDocumentPayload(
             title: "Blood panel — LabCorp",
             kind: .labPanel,
             provider: "Dr. Patel",
             capturedAt: febDate,
-            summary: "Iron low; otherwise within range.",
+            summary: "A1C mildly elevated; iron improving slowly.",
             flagged: false,
             lines: [
                 "Follow-up blood panel",
                 "A1C  5.9%   High",
                 "Iron  46 ug/dL   Low",
                 "Vitamin D  34 ng/mL   Normal"
+            ],
+            labs: febLabs
+        )
+
+        let dec = ShowcaseDocumentPayload(
+            title: "Blood panel — LabCorp",
+            kind: .labPanel,
+            provider: "Dr. Patel",
+            capturedAt: decDate,
+            summary: "Vitamin D back in range; iron still trailing.",
+            flagged: false,
+            lines: [
+                "Quarterly blood panel",
+                "A1C  5.8%   High",
+                "Iron  44 ug/dL   Low",
+                "Vitamin D  31 ng/mL   Normal"
+            ],
+            labs: [
+                ShowcaseLabPayload(metric: "A1C", value: 5.8, unit: "%", referenceLow: 4.0, referenceHigh: 5.6, status: .high),
+                ShowcaseLabPayload(metric: "Iron", value: 44, unit: "µg/dL", referenceLow: 60, referenceHigh: 170, status: .low),
+                ShowcaseLabPayload(metric: "Vitamin D", value: 31, unit: "ng/mL", referenceLow: 30, referenceHigh: 100, status: .normal)
+            ]
+        )
+
+        let sep = ShowcaseDocumentPayload(
+            title: "Blood panel — LabCorp",
+            kind: .labPanel,
+            provider: "Dr. Patel",
+            capturedAt: sepDate,
+            summary: "Iron and vitamin D both landed below range.",
+            flagged: true,
+            lines: [
+                "Quarterly blood panel",
+                "A1C  5.7%   High",
+                "Iron  41 ug/dL   Low",
+                "Vitamin D  27 ng/mL   Low"
+            ],
+            labs: [
+                ShowcaseLabPayload(metric: "A1C", value: 5.7, unit: "%", referenceLow: 4.0, referenceHigh: 5.6, status: .high),
+                ShowcaseLabPayload(metric: "Iron", value: 41, unit: "µg/dL", referenceLow: 60, referenceHigh: 170, status: .low),
+                ShowcaseLabPayload(metric: "Vitamin D", value: 27, unit: "ng/mL", referenceLow: 30, referenceHigh: 100, status: .low)
+            ]
+        )
+
+        let jun = ShowcaseDocumentPayload(
+            title: "Blood panel — LabCorp",
+            kind: .labPanel,
+            provider: "Dr. Patel",
+            capturedAt: junDate,
+            summary: "Borderline A1C with low vitamin D at baseline.",
+            flagged: true,
+            lines: [
+                "Baseline blood panel",
+                "A1C  5.6%   Borderline",
+                "Iron  63 ug/dL   Normal",
+                "Vitamin D  24 ng/mL   Low"
+            ],
+            labs: [
+                ShowcaseLabPayload(metric: "A1C", value: 5.6, unit: "%", referenceLow: 4.0, referenceHigh: 5.6, status: .normal),
+                ShowcaseLabPayload(metric: "Iron", value: 63, unit: "µg/dL", referenceLow: 60, referenceHigh: 170, status: .normal),
+                ShowcaseLabPayload(metric: "Vitamin D", value: 24, unit: "ng/mL", referenceLow: 30, referenceHigh: 100, status: .low)
             ]
         )
 
@@ -293,7 +383,8 @@ enum SampleData {
                 "Prediabetes lifestyle counseling",
                 "Continue home BP checks",
                 "Follow-up in 3 months"
-            ]
+            ],
+            labs: []
         )
 
         let prescription = ShowcaseDocumentPayload(
@@ -308,10 +399,11 @@ enum SampleData {
                 "Iron supplement 65 mg — daily at 8:00 AM",
                 "Metformin 500 mg — daily at 6:00 PM",
                 "Notes: take metformin with dinner"
-            ]
+            ],
+            labs: []
         )
 
-        return (apr, feb, physical, prescription)
+        return [apr, feb, dec, sep, jun, physical, prescription]
     }
 
     private static func dateAt(
@@ -332,30 +424,104 @@ enum SampleData {
         _ payload: ShowcaseDocumentPayload,
         existingDocuments: [MedicalDocument],
         context: ModelContext
-    ) {
-        if let existing = existingDocuments.first(where: { $0.title == payload.title && $0.summary == payload.summary }) {
-            if existing.imageData == nil {
-                existing.imageData = makeShowcaseDocumentImageData(payload)
-            }
-            existing.provider = existing.provider ?? payload.provider
+    ) -> MedicalDocument {
+        let calendar = Calendar.current
+
+        if let existing = existingDocuments.first(where: {
+            $0.kind == payload.kind &&
+            calendar.isDate($0.capturedAt, inSameDayAs: payload.capturedAt) &&
+            normalizedShowcaseString($0.title) == normalizedShowcaseString(payload.title) &&
+            normalizedShowcaseString($0.provider) == normalizedShowcaseString(payload.provider)
+        }) {
+            existing.title = payload.title
+            existing.summary = payload.summary
+            existing.provider = payload.provider
             existing.flagged = payload.flagged
+            existing.capturedAt = payload.capturedAt
             if existing.kindRaw != payload.kind.rawValue {
                 existing.kindRaw = payload.kind.rawValue
             }
-            return
+            existing.imageData = makeShowcaseDocumentImageData(payload)
+            return existing
         }
 
-        context.insert(
-            MedicalDocument(
-                title: payload.title,
-                kind: payload.kind,
-                provider: payload.provider,
-                capturedAt: payload.capturedAt,
-                summary: payload.summary,
-                flagged: payload.flagged,
-                imageData: makeShowcaseDocumentImageData(payload)
-            )
+        let document = MedicalDocument(
+            title: payload.title,
+            kind: payload.kind,
+            provider: payload.provider,
+            capturedAt: payload.capturedAt,
+            summary: payload.summary,
+            flagged: payload.flagged,
+            imageData: makeShowcaseDocumentImageData(payload)
         )
+        context.insert(document)
+        return document
+    }
+
+    private static func normalizedShowcaseString(_ value: String?) -> String {
+        value?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() ?? ""
+    }
+
+    private static func insertShowcaseLabs(
+        for document: MedicalDocument,
+        payload: ShowcaseDocumentPayload,
+        context: ModelContext
+    ) {
+        for lab in payload.labs {
+            context.insert(
+                LabResult(
+                    document: document,
+                    metric: lab.metric,
+                    value: lab.value,
+                    unit: lab.unit,
+                    referenceLow: lab.referenceLow,
+                    referenceHigh: lab.referenceHigh,
+                    capturedAt: payload.capturedAt,
+                    status: lab.status
+                )
+            )
+        }
+    }
+
+    private static func upsertShowcaseLabs(
+        for document: MedicalDocument,
+        payload: ShowcaseDocumentPayload,
+        existingLabs: [LabResult],
+        context: ModelContext
+    ) {
+        let calendar = Calendar.current
+
+        for lab in payload.labs {
+            if let existing = existingLabs.first(where: {
+                $0.document?.persistentModelID == document.persistentModelID &&
+                metricToken($0.metric) == metricToken(lab.metric) &&
+                calendar.isDate($0.capturedAt, inSameDayAs: payload.capturedAt)
+            }) {
+                existing.metric = lab.metric
+                existing.value = lab.value
+                existing.unit = lab.unit
+                existing.referenceLow = lab.referenceLow
+                existing.referenceHigh = lab.referenceHigh
+                existing.capturedAt = payload.capturedAt
+                existing.statusRaw = lab.status.rawValue
+                existing.document = document
+            } else {
+                context.insert(
+                    LabResult(
+                        document: document,
+                        metric: lab.metric,
+                        value: lab.value,
+                        unit: lab.unit,
+                        referenceLow: lab.referenceLow,
+                        referenceHigh: lab.referenceHigh,
+                        capturedAt: payload.capturedAt,
+                        status: lab.status
+                    )
+                )
+            }
+        }
     }
 
     private static func makeShowcaseDocumentImageData(_ payload: ShowcaseDocumentPayload) -> Data? {

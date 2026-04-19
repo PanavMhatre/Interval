@@ -16,7 +16,13 @@ struct ProfileView: View {
     private var profile: UserProfile? { profiles.first }
 
     private var featuredLab: LabResult? {
-        labs.first(where: { $0.status != .normal }) ?? labs.first
+        a1cLab ?? labs.first(where: { $0.status != .normal }) ?? labs.first
+    }
+
+    private var a1cLab: LabResult? {
+        labs
+            .filter { metricToken($0.metric) == metricToken("A1C") }
+            .max { $0.capturedAt < $1.capturedAt }
     }
 
     private var supportingLabs: [LabResult] {
@@ -228,98 +234,66 @@ struct ProfileView: View {
         } label: {
             panelCard(
                 accent: lab.status == .normal ? Theme.Palette.mint : Theme.Palette.peachTint,
-                accentSize: 240,
-                alignment: .topTrailing
+                accentSize: 220,
+                alignment: .topTrailing,
+                radius: 34,
+                padding: 24
             ) {
-                VStack(alignment: .leading, spacing: 20) {
-                    HStack(alignment: .top, spacing: 14) {
-                        ZStack {
-                            Circle()
-                                .fill(lab.status == .normal ? Theme.Palette.mint : Theme.Palette.peachTint)
-                                .frame(width: 48, height: 48)
-
-                            Image(systemName: metricIconName(for: lab.metric))
-                                .font(.system(size: 18, weight: .semibold))
-                                .foregroundStyle(metricAccent(for: lab.status))
-                        }
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(lab.metric)
-                                .font(Theme.Font.body(19, weight: .semibold))
-                                .foregroundStyle(Theme.Palette.ink)
-
-                            Text(metricContextLine(for: lab))
-                                .font(Theme.Font.body(13, weight: .medium))
-                                .foregroundStyle(Theme.Palette.inkMuted)
-                        }
-
-                        Spacer()
-
-                        metricStatusBadge(for: lab.status)
-                    }
-
-                    HStack(alignment: .lastTextBaseline, spacing: 6) {
-                        Text(metricValueText(for: lab))
-                            .font(.system(size: 50, weight: .bold, design: .rounded))
+                VStack(alignment: .leading, spacing: 22) {
+                    HStack(alignment: .top) {
+                        Text(lab.metric)
+                            .font(Theme.Font.display(28, weight: .bold))
                             .foregroundStyle(Theme.Palette.ink)
 
-                        Text(lab.unit)
-                            .font(Theme.Font.body(18, weight: .semibold))
-                            .foregroundStyle(Theme.Palette.inkMuted)
-                            .padding(.bottom, 7)
+                        Spacer()
+
+                        Image(systemName: "arrow.up.right")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(Theme.Palette.primary)
+                            .frame(width: 48, height: 48)
+                            .background(
+                                Circle()
+                                    .fill(Theme.Palette.surfaceContainerLowest)
+                            )
+                            .overlay(
+                                Circle()
+                                    .strokeBorder(Theme.Palette.outlineVariant.opacity(0.95), lineWidth: 1)
+                            )
                     }
 
-                    if let rangeModel = rangeBarModel(for: lab) {
-                        VStack(alignment: .leading, spacing: 10) {
-                            GeometryReader { proxy in
-                                let width = proxy.size.width
-                                let markerX = width * rangeModel.valuePosition
-                                let rangeWidth = width * max(0.06, rangeModel.highPosition - rangeModel.lowPosition)
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(alignment: .lastTextBaseline, spacing: 6) {
+                            Text(metricValueText(for: lab))
+                                .font(.system(size: 58, weight: .bold, design: .rounded))
+                                .foregroundStyle(Theme.Palette.ink)
 
-                                ZStack(alignment: .leading) {
-                                    Capsule()
-                                        .fill(Theme.Palette.paperSoft)
-                                        .frame(height: 14)
-
-                                    Capsule()
-                                        .fill((lab.status == .normal ? Theme.Palette.mint : Theme.Palette.peachTint).opacity(0.88))
-                                        .frame(width: rangeWidth, height: 14)
-                                        .offset(x: width * rangeModel.lowPosition)
-
-                                    Circle()
-                                        .fill(metricAccent(for: lab.status))
-                                        .frame(width: 18, height: 18)
-                                        .overlay(Circle().strokeBorder(.white, lineWidth: 3))
-                                        .offset(x: min(max(markerX - 9, 0), max(width - 18, 0)))
-                                }
-                            }
-                            .frame(height: 18)
-
-                            HStack {
-                                Text(metricRangeLabel(rangeModel.low))
-                                Spacer()
-                                Text("Reference Range")
-                                Spacer()
-                                Text(metricRangeLabel(rangeModel.high))
-                            }
-                            .font(Theme.Font.body(12, weight: .semibold))
-                            .foregroundStyle(Theme.Palette.inkMuted)
+                            Text(lab.unit)
+                                .font(Theme.Font.body(20, weight: .semibold))
+                                .foregroundStyle(Theme.Palette.inkMuted)
+                                .padding(.bottom, 8)
                         }
+
+                        Text(featuredRangeSummary(for: lab))
+                            .font(Theme.Font.body(17, weight: .medium))
+                            .foregroundStyle(Theme.Palette.inkSoft)
                     }
 
-                    HStack(alignment: .center, spacing: 10) {
-                        Label(
-                            lab.capturedAt.formatted(.dateTime.month(.abbreviated).day()),
-                            systemImage: "calendar"
-                        )
-                        .font(Theme.Font.body(12, weight: .semibold))
-                        .foregroundStyle(Theme.Palette.inkMuted)
+                    HStack(alignment: .center) {
+                        Text(featuredStatusChipText(for: lab))
+                            .font(Theme.Font.body(15, weight: .semibold))
+                            .foregroundStyle(featuredStatusChipForeground(for: lab.status))
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(
+                                Capsule().fill(featuredStatusChipFill(for: lab.status))
+                            )
 
                         Spacer()
 
-                        Text("Tap to view trend")
+                        Text(metricContextLine(for: lab))
                             .font(Theme.Font.body(12, weight: .semibold))
-                            .foregroundStyle(Theme.Palette.primary)
+                            .foregroundStyle(Theme.Palette.inkMuted)
+                            .multilineTextAlignment(.trailing)
                     }
                 }
             }
@@ -348,6 +322,46 @@ struct ProfileView: View {
     private func metricContextLine(for lab: LabResult) -> String {
         let source = lab.document?.provider ?? lab.document?.title ?? "Latest result"
         return "\(source) • \(lab.capturedAt.formatted(.dateTime.month(.abbreviated).day()))"
+    }
+
+    private func featuredRangeSummary(for lab: LabResult) -> String {
+        switch lab.status {
+        case .normal:
+            return "Within range"
+        case .low:
+            return "Below range"
+        case .high:
+            return "Above range"
+        }
+    }
+
+    private func featuredStatusChipText(for lab: LabResult) -> String {
+        switch lab.status {
+        case .normal:
+            return "Healthy"
+        case .low:
+            return "Low"
+        case .high:
+            return "Elevated"
+        }
+    }
+
+    private func featuredStatusChipFill(for status: LabStatus) -> Color {
+        switch status {
+        case .normal:
+            return Theme.Palette.primaryFixed
+        case .low, .high:
+            return Theme.Palette.secondaryFixed
+        }
+    }
+
+    private func featuredStatusChipForeground(for status: LabStatus) -> Color {
+        switch status {
+        case .normal:
+            return Theme.Palette.primary
+        case .low, .high:
+            return Theme.Palette.secondary
+        }
     }
 
     private func metricValueText(for lab: LabResult) -> String {

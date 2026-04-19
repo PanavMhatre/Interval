@@ -11,11 +11,17 @@ struct OnboardingView: View {
     @State private var camera: PermissionState = .on
     @State private var notifications: PermissionState = .ask
     @State private var cloudAI: PermissionState = .skip
-    @State private var userName: String = ""
-    @State private var hasSubmittedName = false
+    @State private var firstNameInput = ""
+    @State private var lastNameInput = ""
+    @State private var ageInput = ""
+    @State private var submittedFirstName: String?
+    @State private var submittedLastName: String?
+    @State private var submittedAge: Int?
     @State private var isFinishing = false
+    @FocusState private var focusedField: IntakeField?
 
     enum PermissionState: String { case on, ask, skip }
+    enum IntakeField { case firstName, lastName, age }
 
     var body: some View {
         ZStack {
@@ -39,13 +45,6 @@ struct OnboardingView: View {
     private var welcomeStep: some View {
         VStack(spacing: Theme.Space.lg) {
             Spacer()
-
-            ZStack {
-                Circle().fill(Theme.Palette.peachTint).frame(width: 64, height: 64)
-                Text("hi")
-                    .font(Theme.Font.display(20, weight: .semibold))
-                    .foregroundStyle(Theme.Palette.coralDeep)
-            }
 
             VStack(spacing: 6) {
                 Text("Hey there.")
@@ -229,70 +228,55 @@ struct OnboardingView: View {
 
     private var conversationalStep: some View {
         VStack(alignment: .leading, spacing: Theme.Space.md) {
-            HStack {
-                Text("Meet Interval")
-                    .font(Theme.Font.display(22, weight: .semibold))
-                Spacer()
-                PillTag(text: "on-device", fill: Theme.Palette.peachTint, border: Theme.Palette.coral.opacity(0.3), foreground: Theme.Palette.coralDeep, icon: "lock.fill")
-            }
-            DashedHairline()
-
-            // Intro bubble
             chatBubble(isUser: false) {
-                HStack(alignment: .top, spacing: 10) {
-                    AvatarCircle(initials: "i", size: 30)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Interval").font(Theme.Font.cardTitle).foregroundStyle(Theme.Palette.ink)
-                        Text("your health, together".uppercased())
-                            .font(Theme.Font.body(10, weight: .semibold))
-                            .tracking(0.8)
-                            .foregroundStyle(Theme.Palette.inkMuted)
-                    }
-                }
-            }
-
-            chatBubble(isUser: false) {
-                Text("Hi! I'm here to help you keep track of your health in one place. Mind if I ask 3 quick things?")
+                Text("I just need 3 quick details to set up your profile.")
                     .font(Theme.Font.bodyText)
                     .foregroundStyle(Theme.Palette.ink)
             }
 
             chatBubble(isUser: false) {
-                Text("First — what should I call you?")
+                Text("First, what's your first name?")
                     .font(Theme.Font.bodyText)
                     .foregroundStyle(Theme.Palette.ink)
             }
 
-            if !hasSubmittedName {
-                HStack {
-                    Spacer()
-                    TextField("Your name", text: $userName)
-                        .textFieldStyle(.plain)
+            if let submittedFirstName {
+                userReplyBubble(submittedFirstName)
+                chatBubble(isUser: false) {
+                    Text("Thanks, \(submittedFirstName). What's your last name?")
                         .font(Theme.Font.bodyText)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(Capsule().fill(Theme.Palette.ink))
-                        .foregroundStyle(.white)
-                        .tint(.white)
-                        .frame(maxWidth: 200)
-                        .submitLabel(.done)
-                        .onSubmit {
-                            submitName()
-                        }
+                        .foregroundStyle(Theme.Palette.ink)
                 }
             } else {
-                HStack {
-                    Spacer()
-                    Text(userName)
+                intakeField(
+                    placeholder: "First name",
+                    text: $firstNameInput,
+                    field: .firstName,
+                    submitLabel: .next
+                )
+            }
+
+            if let submittedLastName {
+                userReplyBubble(submittedLastName)
+                chatBubble(isUser: false) {
+                    Text("Got it. How old are you?")
                         .font(Theme.Font.bodyText)
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(Capsule().fill(Theme.Palette.ink))
+                        .foregroundStyle(Theme.Palette.ink)
                 }
+            } else if submittedFirstName != nil {
+                intakeField(
+                    placeholder: "Last name",
+                    text: $lastNameInput,
+                    field: .lastName,
+                    submitLabel: .next
+                )
+            }
+
+            if let submittedAge {
+                userReplyBubble("\(submittedAge)")
 
                 chatBubble(isUser: false) {
-                    Text("Nice to meet you, \(userName). Want me to connect Apple Health for live steps, sleep, hydration, and heart rate?")
+                    Text("Perfect, \(resolvedFullName). Want me to connect Apple Health for live steps, sleep, hydration, and heart rate?")
                         .font(Theme.Font.bodyText)
                         .foregroundStyle(Theme.Palette.ink)
                 }
@@ -312,6 +296,14 @@ struct OnboardingView: View {
                         }
                     }
                 }
+            } else if submittedFirstName != nil && submittedLastName != nil {
+                intakeField(
+                    placeholder: "Age",
+                    text: $ageInput,
+                    field: .age,
+                    submitLabel: .done,
+                    isNumeric: true
+                )
             }
 
             Spacer()
@@ -331,6 +323,19 @@ struct OnboardingView: View {
         }
         .padding(.horizontal, Theme.Space.lg)
         .padding(.vertical, Theme.Space.xl)
+        .onAppear {
+            focusedField = currentInputField
+        }
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") {
+                    submitCurrentField()
+                }
+                .font(Theme.Font.body(14, weight: .semibold))
+                .foregroundStyle(Theme.Palette.primary)
+            }
+        }
     }
 
     private func chatBubble<Content: View>(isUser: Bool, @ViewBuilder content: () -> Content) -> some View {
@@ -368,14 +373,112 @@ struct OnboardingView: View {
         .buttonStyle(.plain)
     }
 
+    private func intakeField(
+        placeholder: String,
+        text: Binding<String>,
+        field: IntakeField,
+        submitLabel: SubmitLabel,
+        isNumeric: Bool = false
+    ) -> some View {
+        HStack {
+            Spacer()
+            TextField(
+                "",
+                text: text,
+                prompt: Text(placeholder)
+                    .foregroundStyle(.white.opacity(0.76))
+            )
+            .textFieldStyle(.plain)
+            .font(Theme.Font.bodyText)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
+            .background(Capsule().fill(Theme.Palette.ink))
+            .foregroundStyle(.white)
+            .tint(.white)
+            .frame(maxWidth: 220)
+            .textInputAutocapitalization(isNumeric ? .never : .words)
+            .keyboardType(isNumeric ? .numberPad : .default)
+            .focused($focusedField, equals: field)
+            .submitLabel(submitLabel)
+            .onSubmit {
+                submitCurrentField()
+            }
+        }
+    }
+
+    private func userReplyBubble(_ text: String) -> some View {
+        HStack {
+            Spacer()
+            Text(text)
+                .font(Theme.Font.bodyText)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(Capsule().fill(Theme.Palette.ink))
+        }
+    }
+
     // MARK: Finish
 
-    private func submitName() {
-        let trimmed = userName.trimmingCharacters(in: .whitespacesAndNewlines)
+    private var currentInputField: IntakeField? {
+        if submittedFirstName == nil { return .firstName }
+        if submittedLastName == nil { return .lastName }
+        if submittedAge == nil { return .age }
+        return nil
+    }
+
+    private var resolvedFullName: String {
+        [submittedFirstName, submittedLastName]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
+    private var resolvedInitials: String {
+        let first = submittedFirstName?.first.map(String.init) ?? ""
+        let last = submittedLastName?.first.map(String.init) ?? ""
+        let combined = (first + last).uppercased()
+        return combined.isEmpty ? "F" : combined
+    }
+
+    private func submitCurrentField() {
+        switch currentInputField {
+        case .firstName:
+            submitFirstName()
+        case .lastName:
+            submitLastName()
+        case .age:
+            submitAge()
+        case nil:
+            focusedField = nil
+        }
+    }
+
+    private func submitFirstName() {
+        let trimmed = firstNameInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        userName = trimmed
+        firstNameInput = trimmed
+        submittedFirstName = trimmed
         Haptics.tap()
-        hasSubmittedName = true
+        focusedField = .lastName
+    }
+
+    private func submitLastName() {
+        let trimmed = lastNameInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        lastNameInput = trimmed
+        submittedLastName = trimmed
+        Haptics.tap()
+        focusedField = .age
+    }
+
+    private func submitAge() {
+        let trimmed = ageInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let age = Int(trimmed), (1...120).contains(age) else { return }
+        ageInput = String(age)
+        submittedAge = age
+        Haptics.tap()
+        focusedField = nil
     }
 
     private func finishOnboarding(requestHealthAccess: Bool) async {
@@ -388,15 +491,17 @@ struct OnboardingView: View {
 
         Haptics.success()
         if let profile = profiles.first {
-            if !userName.isEmpty {
-                profile.name = userName
-                profile.initials = String(userName.prefix(1)).uppercased()
+            profile.name = resolvedFullName.isEmpty ? "Friend" : resolvedFullName
+            profile.initials = resolvedInitials
+            if let submittedAge {
+                profile.age = submittedAge
             }
             profile.hasCompletedOnboarding = true
         } else {
             let p = UserProfile(
-                name: userName.isEmpty ? "Friend" : userName,
-                initials: userName.isEmpty ? "F" : String(userName.prefix(1)).uppercased(),
+                name: resolvedFullName.isEmpty ? "Friend" : resolvedFullName,
+                initials: resolvedInitials,
+                age: submittedAge ?? 34,
                 hasCompletedOnboarding: true
             )
             context.insert(p)

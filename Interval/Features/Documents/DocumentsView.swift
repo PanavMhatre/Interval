@@ -458,27 +458,28 @@ struct DocumentsView: View {
                 documentLeadingVisual(doc)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack {
-                        Text(doc.title)
-                            .font(Theme.Font.body(16, weight: .semibold))
+                        Text(documentDisplayTitle(for: doc))
+                            .font(Theme.Font.body(15, weight: .semibold))
                             .foregroundStyle(Theme.Palette.ink)
+                            .multilineTextAlignment(.leading)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
                         if doc.flagged {
                             StatusChip(text: "Flag", kind: .flag)
                         }
                     }
-                    Text(doc.provider ?? doc.kind.displayName)
+                    Text(documentDisplaySubtitle(for: doc))
                         .font(Theme.Font.caption)
                         .foregroundStyle(Theme.Palette.inkMuted)
+                        .lineLimit(1)
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 4) {
                     Text(doc.capturedAt.formatted(.dateTime.month(.abbreviated).day()))
                         .font(Theme.Font.caption)
                         .foregroundStyle(Theme.Palette.inkMuted)
-                    if doc.imageData != nil {
-                        Image(systemName: "doc.viewfinder")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Theme.Palette.coralDeep)
-                    }
+
+                    documentOpenChip(doc)
                 }
             }
 
@@ -510,6 +511,60 @@ struct DocumentsView: View {
         .softCard()
         } // end Button label
         .buttonStyle(.plain)
+    }
+
+    private func documentOpenChip(_ doc: MedicalDocument) -> some View {
+        Image(systemName: doc.imageData != nil ? "doc.viewfinder.fill" : "doc.fill")
+            .font(.system(size: 13, weight: .semibold))
+        .foregroundStyle(Theme.Palette.coralDeep)
+        .frame(width: 32, height: 32)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Theme.Palette.peachTint)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Theme.Palette.coral.opacity(0.18), lineWidth: 1)
+        )
+    }
+
+    private func documentDisplayTitle(for doc: MedicalDocument) -> String {
+        let trimmed = doc.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let dashSeparated = trimmed
+            .replacingOccurrences(of: " – ", with: " — ")
+            .components(separatedBy: " — ")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        let baseTitle = dashSeparated.first ?? trimmed
+
+        if baseTitle.lowercased().hasPrefix("rx:") {
+            return baseTitle
+                .replacingOccurrences(of: "Rx:", with: "", options: [.caseInsensitive])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        return baseTitle
+    }
+
+    private func documentDisplaySubtitle(for doc: MedicalDocument) -> String {
+        let provider = doc.provider?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !provider.isEmpty {
+            return provider
+        }
+
+        let trimmed = doc.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let dashSeparated = trimmed
+            .replacingOccurrences(of: " – ", with: " — ")
+            .components(separatedBy: " — ")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        if dashSeparated.count > 1 {
+            return dashSeparated.dropFirst().joined(separator: " · ")
+        }
+
+        return doc.kind.displayName
     }
 
     @ViewBuilder
