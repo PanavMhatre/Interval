@@ -20,7 +20,6 @@ struct DocumentsView: View {
         case all
         case flagged
         case labs
-        case prescriptions
         case visits
 
         var id: String { rawValue }
@@ -30,7 +29,6 @@ struct DocumentsView: View {
             case .all: "All"
             case .flagged: "Flagged"
             case .labs: "Labs"
-            case .prescriptions: "Rx"
             case .visits: "Visits"
             }
         }
@@ -43,8 +41,6 @@ struct DocumentsView: View {
                 return document.flagged
             case .labs:
                 return document.kind == .labPanel
-            case .prescriptions:
-                return document.kind == .prescription
             case .visits:
                 return document.kind == .visitNote
             }

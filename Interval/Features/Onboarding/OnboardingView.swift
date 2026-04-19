@@ -12,6 +12,7 @@ struct OnboardingView: View {
     @State private var notifications: PermissionState = .ask
     @State private var cloudAI: PermissionState = .skip
     @State private var userName: String = ""
+    @State private var hasSubmittedName = false
     @State private var isFinishing = false
 
     enum PermissionState: String { case on, ask, skip }
@@ -262,7 +263,7 @@ struct OnboardingView: View {
                     .foregroundStyle(Theme.Palette.ink)
             }
 
-            if userName.isEmpty {
+            if !hasSubmittedName {
                 HStack {
                     Spacer()
                     TextField("Your name", text: $userName)
@@ -276,10 +277,7 @@ struct OnboardingView: View {
                         .frame(maxWidth: 200)
                         .submitLabel(.done)
                         .onSubmit {
-                            Haptics.tap()
-                            Task {
-                                await finishOnboarding(requestHealthAccess: healthKit == .on)
-                            }
+                            submitName()
                         }
                 }
             } else {
@@ -371,6 +369,14 @@ struct OnboardingView: View {
     }
 
     // MARK: Finish
+
+    private func submitName() {
+        let trimmed = userName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        userName = trimmed
+        Haptics.tap()
+        hasSubmittedName = true
+    }
 
     private func finishOnboarding(requestHealthAccess: Bool) async {
         guard !isFinishing else { return }

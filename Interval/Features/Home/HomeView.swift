@@ -7,8 +7,11 @@ struct HomeView: View {
     @Query private var profiles: [UserProfile]
     @Query(sort: [SortDescriptor(\Medication.createdAt)]) private var medications: [Medication]
     @Query(sort: [SortDescriptor(\DoseLog.scheduledFor)]) private var doseLogs: [DoseLog]
+    @Query(sort: [SortDescriptor(\LabResult.capturedAt, order: .reverse)]) private var labs: [LabResult]
     @Query(filter: #Predicate<HealthInsight> { !$0.dismissed }, sort: [SortDescriptor(\HealthInsight.createdAt, order: .reverse)])
     private var insights: [HealthInsight]
+
+    @State private var selectedTrendTarget: TrendSheetTarget?
 
     private var profile: UserProfile? { profiles.first }
 
@@ -28,6 +31,11 @@ struct HomeView: View {
         .background(Theme.Palette.paper)
         .task(id: appleHealth.isConnected) {
             await appleHealth.refreshIfNeeded()
+        }
+        .sheet(item: $selectedTrendTarget) { target in
+            MetricTrendSheet(metric: target.metric, labs: labs)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
         }
     }
 
@@ -161,12 +169,18 @@ struct HomeView: View {
     private var featuredInsight: some View {
         Group {
             if let first = insights.first {
+                let linkedMetric = linkedMetric(for: first)
                 InsightCard(
                     eyebrow: first.kind.eyebrow,
                     title: first.title,
                     detail: first.detail,
                     badge: "New",
-                    onPrimary: {},
+                    onPrimary: linkedMetric == nil ? nil : {
+                        if let linkedMetric {
+                            Haptics.tap()
+                            selectedTrendTarget = TrendSheetTarget(metric: linkedMetric)
+                        }
+                    },
                     primaryLabel: "See trend"
                 )
             }
@@ -350,6 +364,15 @@ struct HomeView: View {
     }
     private func isToday(_ date: Date) -> Bool {
         Calendar.current.isDateInToday(date)
+    }
+
+    private func linkedMetric(for insight: HealthInsight) -> String? {
+        let searchable = metricToken(insight.title + " " + insight.detail)
+        if let matched = labs.first(where: { searchable.contains(metricToken($0.metric)) }) {
+            return matched.metric
+        }
+
+        return labs.first?.metric
     }
 }
 

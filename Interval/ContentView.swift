@@ -38,29 +38,33 @@ struct ContentView: View {
     private var mainTabs: some View {
         TabView(selection: $selection) {
             NavigationStack { HomeView().navigationBarHidden(true) }
-                .tabItem { Label("Home",  systemImage: "house.fill") }
+                .tabItem { tabLabel("HOME", selected: .home, activeSymbol: "house.fill", inactiveSymbol: "house") }
                 .tag(Tab.home)
 
             NavigationStack { DocumentsView().navigationBarHidden(true) }
-                .tabItem { Label("Docs",  systemImage: "doc.text.fill") }
+                .tabItem { tabLabel("DOCS", selected: .docs, activeSymbol: "doc.text.fill", inactiveSymbol: "doc.text") }
                 .tag(Tab.docs)
 
             NavigationStack { MedicationsView().navigationBarHidden(true) }
-                .tabItem { Label("Meds",  systemImage: "pills.fill") }
+                .tabItem { tabLabel("MEDS", selected: .meds, activeSymbol: "pills.fill", inactiveSymbol: "pills") }
                 .tag(Tab.meds)
 
             NavigationStack { ChatView() }
-                .tabItem { Label("Chat",  systemImage: "bubble.left.and.bubble.right.fill") }
+                .tabItem { tabLabel("CHAT", selected: .chat, activeSymbol: "message.fill", inactiveSymbol: "message") }
                 .tag(Tab.chat)
 
             NavigationStack { ProfileView().navigationBarHidden(true) }
-                .tabItem { Label("Profile", systemImage: "person.crop.circle.fill") }
+                .tabItem { tabLabel("PROFILE", selected: .profile, activeSymbol: "person.fill", inactiveSymbol: "person") }
                 .tag(Tab.profile)
         }
         .tint(Theme.Palette.primary)
         .onChange(of: selection) { _, _ in
             Haptics.select()
         }
+    }
+
+    private func tabLabel(_ title: String, selected tab: Tab, activeSymbol: String, inactiveSymbol: String) -> some View {
+        Label(title, systemImage: selection == tab ? activeSymbol : inactiveSymbol)
     }
 
     private func configureTabBarAppearance() {
@@ -73,15 +77,20 @@ struct ContentView: View {
         normal.iconColor = UIColor(Theme.Palette.onSurfaceVariant)
         normal.titleTextAttributes = [
             .foregroundColor: UIColor(Theme.Palette.onSurfaceVariant),
-            .font: UIFont.systemFont(ofSize: 11, weight: .medium)
+            .font: UIFont.systemFont(ofSize: 10, weight: .medium),
+            .kern: 0.8
         ]
 
         let selected = appearance.stackedLayoutAppearance.selected
         selected.iconColor = UIColor(Theme.Palette.primary)
         selected.titleTextAttributes = [
             .foregroundColor: UIColor(Theme.Palette.primary),
-            .font: UIFont.systemFont(ofSize: 11, weight: .semibold)
+            .font: UIFont.systemFont(ofSize: 10, weight: .semibold),
+            .kern: 0.9
         ]
+
+        appearance.inlineLayoutAppearance = appearance.stackedLayoutAppearance
+        appearance.compactInlineLayoutAppearance = appearance.stackedLayoutAppearance
 
         UITabBar.appearance().standardAppearance = appearance
         UITabBar.appearance().scrollEdgeAppearance = appearance

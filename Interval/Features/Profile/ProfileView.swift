@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import MessageUI
 
 struct ProfileView: View {
     @EnvironmentObject private var appleHealth: AppleHealthStore
@@ -8,6 +9,9 @@ struct ProfileView: View {
     @Query(sort: [SortDescriptor(\LabResult.capturedAt, order: .reverse)]) private var labs: [LabResult]
     @Query(sort: [SortDescriptor(\MedicalDocument.capturedAt, order: .reverse)]) private var documents: [MedicalDocument]
     @Query(sort: [SortDescriptor(\HealthInsight.createdAt, order: .reverse)]) private var insights: [HealthInsight]
+    @State private var selectedTrendTarget: TrendSheetTarget?
+    @State private var selectedDocument: MedicalDocument?
+    @State private var showingDoctorComposer = false
 
     private var profile: UserProfile? { profiles.first }
 
@@ -24,6 +28,12 @@ struct ProfileView: View {
         )
     }
 
+    private var suggestedDoctorName: String? {
+        documents
+            .compactMap(\.provider)
+            .first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
+    }
+
     private var quickCards: [MiniMetricCardModel] {
         var cards = supportingLabs.map(miniMetricCard)
 
@@ -32,6 +42,7 @@ struct ProfileView: View {
                 MiniMetricCardModel(
                     id: "meds",
                     title: "Active meds",
+                    trendMetric: nil,
                     value: "\(medications.count)",
                     unit: nil,
                     caption: medications.isEmpty ? "Nothing loaded" : "Scheduled today",
@@ -49,6 +60,7 @@ struct ProfileView: View {
                 MiniMetricCardModel(
                     id: "docs",
                     title: "Documents",
+                    trendMetric: nil,
                     value: "\(documents.count)",
                     unit: nil,
                     caption: "Scanned and indexed",
@@ -77,7 +89,6 @@ struct ProfileView: View {
 
                 supportingMetricsGrid
                 tagsGrid
-                medicationsPanel
                 appleHealthPanel
                 recordsPanel
                 sharePanel
@@ -89,6 +100,23 @@ struct ProfileView: View {
         .background(Theme.Palette.paper)
         .task(id: appleHealth.isConnected) {
             await appleHealth.refreshIfNeeded()
+        }
+        .sheet(item: $selectedTrendTarget) { target in
+            MetricTrendSheet(metric: target.metric, labs: labs)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $selectedDocument) { document in
+            DocumentImageViewer(document: document)
+        }
+        .sheet(isPresented: $showingDoctorComposer) {
+            DoctorDraftSheet(
+                summaryText: doctorSummaryText,
+                suggestedDoctorName: suggestedDoctorName,
+                patientName: profile?.name
+            )
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
         }
     }
 
@@ -183,106 +211,108 @@ struct ProfileView: View {
     // MARK: Main metric
 
     private func featuredMetricCard(_ lab: LabResult) -> some View {
-        panelCard(
-            accent: lab.status == .normal ? Theme.Palette.mint : Theme.Palette.peachTint,
-            accentSize: 240,
-            alignment: .topTrailing
-        ) {
-            VStack(alignment: .leading, spacing: 20) {
-                HStack(alignment: .top, spacing: 14) {
-                    ZStack {
-                        Circle()
-                            .fill(lab.status == .normal ? Theme.Palette.mint : Theme.Palette.peachTint)
-                            .frame(width: 48, height: 48)
+        Button {
+            openTrend(for: lab.metric)
+        } label: {
+            panelCard(
+                accent: lab.status == .normal ? Theme.Palette.mint : Theme.Palette.peachTint,
+                accentSize: 240,
+                alignment: .topTrailing
+            ) {
+                VStack(alignment: .leading, spacing: 20) {
+                    HStack(alignment: .top, spacing: 14) {
+                        ZStack {
+                            Circle()
+                                .fill(lab.status == .normal ? Theme.Palette.mint : Theme.Palette.peachTint)
+                                .frame(width: 48, height: 48)
 
-                        Image(systemName: metricIconName(for: lab.metric))
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(metricAccent(for: lab.status))
+                            Image(systemName: metricIconName(for: lab.metric))
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(metricAccent(for: lab.status))
+                        }
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(lab.metric)
+                                .font(Theme.Font.body(19, weight: .semibold))
+                                .foregroundStyle(Theme.Palette.ink)
+
+                            Text(metricContextLine(for: lab))
+                                .font(Theme.Font.body(13, weight: .medium))
+                                .foregroundStyle(Theme.Palette.inkMuted)
+                        }
+
+                        Spacer()
+
+                        metricStatusBadge(for: lab.status)
                     }
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(lab.metric)
-                            .font(Theme.Font.body(19, weight: .semibold))
+                    HStack(alignment: .lastTextBaseline, spacing: 6) {
+                        Text(metricValueText(for: lab))
+                            .font(.system(size: 50, weight: .bold, design: .rounded))
                             .foregroundStyle(Theme.Palette.ink)
 
-                        Text(metricContextLine(for: lab))
-                            .font(Theme.Font.body(13, weight: .medium))
+                        Text(lab.unit)
+                            .font(Theme.Font.body(18, weight: .semibold))
                             .foregroundStyle(Theme.Palette.inkMuted)
+                            .padding(.bottom, 7)
                     }
 
-                    Spacer()
+                    if let rangeModel = rangeBarModel(for: lab) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            GeometryReader { proxy in
+                                let width = proxy.size.width
+                                let markerX = width * rangeModel.valuePosition
+                                let rangeWidth = width * max(0.06, rangeModel.highPosition - rangeModel.lowPosition)
 
-                    metricStatusBadge(for: lab.status)
-                }
+                                ZStack(alignment: .leading) {
+                                    Capsule()
+                                        .fill(Theme.Palette.paperSoft)
+                                        .frame(height: 14)
 
-                HStack(alignment: .lastTextBaseline, spacing: 6) {
-                    Text(metricValueText(for: lab))
-                        .font(.system(size: 50, weight: .bold, design: .rounded))
-                        .foregroundStyle(Theme.Palette.ink)
+                                    Capsule()
+                                        .fill((lab.status == .normal ? Theme.Palette.mint : Theme.Palette.peachTint).opacity(0.88))
+                                        .frame(width: rangeWidth, height: 14)
+                                        .offset(x: width * rangeModel.lowPosition)
 
-                    Text(lab.unit)
-                        .font(Theme.Font.body(18, weight: .semibold))
-                        .foregroundStyle(Theme.Palette.inkMuted)
-                        .padding(.bottom, 7)
-                }
-
-                if let rangeModel = rangeBarModel(for: lab) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        GeometryReader { proxy in
-                            let width = proxy.size.width
-                            let markerX = width * rangeModel.valuePosition
-                            let rangeWidth = width * max(0.06, rangeModel.highPosition - rangeModel.lowPosition)
-
-                            ZStack(alignment: .leading) {
-                                Capsule()
-                                    .fill(Theme.Palette.paperSoft)
-                                    .frame(height: 14)
-
-                                Capsule()
-                                    .fill((lab.status == .normal ? Theme.Palette.mint : Theme.Palette.peachTint).opacity(0.88))
-                                    .frame(width: rangeWidth, height: 14)
-                                    .offset(x: width * rangeModel.lowPosition)
-
-                                Circle()
-                                    .fill(metricAccent(for: lab.status))
-                                    .frame(width: 18, height: 18)
-                                    .overlay(Circle().strokeBorder(.white, lineWidth: 3))
-                                    .offset(x: min(max(markerX - 9, 0), max(width - 18, 0)))
+                                    Circle()
+                                        .fill(metricAccent(for: lab.status))
+                                        .frame(width: 18, height: 18)
+                                        .overlay(Circle().strokeBorder(.white, lineWidth: 3))
+                                        .offset(x: min(max(markerX - 9, 0), max(width - 18, 0)))
+                                }
                             }
-                        }
-                        .frame(height: 18)
+                            .frame(height: 18)
 
-                        HStack {
-                            Text(metricRangeLabel(rangeModel.low))
-                            Spacer()
-                            Text("Reference Range")
-                            Spacer()
-                            Text(metricRangeLabel(rangeModel.high))
+                            HStack {
+                                Text(metricRangeLabel(rangeModel.low))
+                                Spacer()
+                                Text("Reference Range")
+                                Spacer()
+                                Text(metricRangeLabel(rangeModel.high))
+                            }
+                            .font(Theme.Font.body(12, weight: .semibold))
+                            .foregroundStyle(Theme.Palette.inkMuted)
                         }
+                    }
+
+                    HStack(alignment: .center, spacing: 10) {
+                        Label(
+                            lab.capturedAt.formatted(.dateTime.month(.abbreviated).day()),
+                            systemImage: "calendar"
+                        )
                         .font(Theme.Font.body(12, weight: .semibold))
                         .foregroundStyle(Theme.Palette.inkMuted)
-                    }
-                }
 
-                HStack(alignment: .center, spacing: 10) {
-                    Label(
-                        lab.capturedAt.formatted(.dateTime.month(.abbreviated).day()),
-                        systemImage: "calendar"
-                    )
-                    .font(Theme.Font.body(12, weight: .semibold))
-                    .foregroundStyle(Theme.Palette.inkMuted)
+                        Spacer()
 
-                    Spacer()
-
-                    if let insight = insights.first {
-                        Text(insight.title)
-                            .font(Theme.Font.body(12, weight: .medium))
-                            .foregroundStyle(Theme.Palette.inkSoft)
-                            .lineLimit(1)
+                        Text("Tap to view trend")
+                            .font(Theme.Font.body(12, weight: .semibold))
+                            .foregroundStyle(Theme.Palette.primary)
                     }
                 }
             }
         }
+        .buttonStyle(.plain)
     }
 
     private var emptyMetricCard: some View {
@@ -390,6 +420,7 @@ struct ProfileView: View {
         return MiniMetricCardModel(
             id: String(describing: lab.persistentModelID),
             title: lab.metric,
+            trendMetric: lab.metric,
             value: metricValueText(for: lab),
             unit: lab.unit,
             caption: positive ? "Within range" : statusCaption(for: lab.status),
@@ -402,6 +433,27 @@ struct ProfileView: View {
     }
 
     private func miniMetricCardView(_ card: MiniMetricCardModel) -> some View {
+        Group {
+            if let trendMetric = card.trendMetric {
+                Button {
+                    openTrend(for: trendMetric)
+                } label: {
+                    miniMetricCardBody(card)
+                }
+                .buttonStyle(.plain)
+            } else {
+                miniMetricCardBody(card)
+            }
+        }
+    }
+
+    private func usesCornerTrendArrow(_ card: MiniMetricCardModel) -> Bool {
+        guard card.trendMetric != nil else { return false }
+        let title = card.title.lowercased()
+        return title.contains("vitamin d") || title.contains("iron")
+    }
+
+    private func miniMetricCardBody(_ card: MiniMetricCardModel) -> some View {
         panelCard(accent: card.tint, accentSize: 120, alignment: .topTrailing, radius: 28, padding: 18) {
             VStack(alignment: .leading, spacing: 18) {
                 HStack(alignment: .top) {
@@ -411,9 +463,24 @@ struct ProfileView: View {
 
                     Spacer()
 
-                    Circle()
-                        .fill(card.accent.opacity(0.9))
-                        .frame(width: 10, height: 10)
+                    if usesCornerTrendArrow(card) {
+                        Image(systemName: "arrow.up.right")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(Theme.Palette.primary)
+                            .frame(width: 28, height: 28)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(Theme.Palette.surfaceContainerLowest)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .strokeBorder(Theme.Palette.outlineVariant.opacity(0.9), lineWidth: 1)
+                            )
+                    } else {
+                        Circle()
+                            .fill(card.accent.opacity(0.9))
+                            .frame(width: 10, height: 10)
+                    }
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -441,6 +508,12 @@ struct ProfileView: View {
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     .background(Capsule().fill(card.statusFill))
+
+                if card.trendMetric != nil && !usesCornerTrendArrow(card) {
+                    Text("Tap for trend")
+                        .font(Theme.Font.body(12, weight: .semibold))
+                        .foregroundStyle(Theme.Palette.primary)
+                }
             }
         }
     }
@@ -498,67 +571,10 @@ struct ProfileView: View {
                         }
                     }
                 }
+
+                Spacer(minLength: 0)
             }
-        }
-    }
-
-    private var medicationsPanel: some View {
-        panelCard(accent: Theme.Palette.paperSoft, accentSize: 180, alignment: .topTrailing) {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack(alignment: .center) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Current meds")
-                            .font(Theme.Font.body(18, weight: .semibold))
-                            .foregroundStyle(Theme.Palette.ink)
-                        Text("\(medications.count) active medications")
-                            .font(Theme.Font.body(13, weight: .medium))
-                            .foregroundStyle(Theme.Palette.inkMuted)
-                    }
-
-                    Spacer()
-
-                    Text("\(medications.count)")
-                        .font(.system(size: 24, weight: .bold, design: .rounded))
-                        .foregroundStyle(Theme.Palette.ink)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Capsule().fill(Theme.Palette.paperSoft))
-                }
-
-                if medications.isEmpty {
-                    Text("No active medications yet.")
-                        .font(Theme.Font.body(14, weight: .medium))
-                        .foregroundStyle(Theme.Palette.inkMuted)
-                } else {
-                    VStack(spacing: 12) {
-                        ForEach(Array(medications.prefix(3).enumerated()), id: \.element.persistentModelID) { index, med in
-                            HStack(alignment: .center, spacing: 12) {
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(med.name)
-                                        .font(Theme.Font.body(15, weight: .semibold))
-                                        .foregroundStyle(Theme.Palette.ink)
-                                    Text(med.scheduleText)
-                                        .font(Theme.Font.body(13, weight: .medium))
-                                        .foregroundStyle(Theme.Palette.inkMuted)
-                                }
-
-                                Spacer()
-
-                                Text(med.doseText)
-                                    .font(Theme.Font.body(13, weight: .semibold))
-                                    .foregroundStyle(Theme.Palette.ink)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 7)
-                                    .background(Capsule().fill(Theme.Palette.paperSoft))
-                            }
-
-                            if index < min(medications.count, 3) - 1 {
-                                DashedHairline()
-                            }
-                        }
-                    }
-                }
-            }
+            .frame(maxWidth: .infinity, minHeight: 140, alignment: .topLeading)
         }
     }
 
@@ -663,29 +679,39 @@ struct ProfileView: View {
                             .foregroundStyle(Theme.Palette.inkMuted)
                             .textCase(.uppercase)
 
-                        HStack(alignment: .top, spacing: 12) {
-                            ZStack {
-                                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                    .fill(latest.flagged ? Theme.Palette.peachTint : Theme.Palette.paperSoft)
-                                    .frame(width: 42, height: 42)
+                        Button {
+                            Haptics.tap()
+                            selectedDocument = latest
+                        } label: {
+                            HStack(alignment: .top, spacing: 12) {
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                        .fill(latest.flagged ? Theme.Palette.peachTint : Theme.Palette.paperSoft)
+                                        .frame(width: 42, height: 42)
 
-                                Image(systemName: latest.kind.iconName)
-                                    .font(.system(size: 16, weight: .semibold))
-                                    .foregroundStyle(latest.flagged ? Theme.Palette.coralDeep : Theme.Palette.ink)
+                                    Image(systemName: latest.kind.iconName)
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundStyle(latest.flagged ? Theme.Palette.coralDeep : Theme.Palette.ink)
+                                }
+
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(latest.title)
+                                        .font(Theme.Font.body(15, weight: .semibold))
+                                        .foregroundStyle(Theme.Palette.ink)
+                                    Text(latest.summary.isEmpty ? "Scanned and stored." : latest.summary)
+                                        .font(Theme.Font.body(13, weight: .medium))
+                                        .foregroundStyle(Theme.Palette.inkSoft)
+                                        .lineLimit(2)
+                                }
+
+                                Spacer()
+
+                                Image(systemName: "arrow.up.right")
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundStyle(Theme.Palette.primary)
                             }
-
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(latest.title)
-                                    .font(Theme.Font.body(15, weight: .semibold))
-                                    .foregroundStyle(Theme.Palette.ink)
-                                Text(latest.summary.isEmpty ? "Scanned and stored." : latest.summary)
-                                    .font(Theme.Font.body(13, weight: .medium))
-                                    .foregroundStyle(Theme.Palette.inkSoft)
-                                    .lineLimit(2)
-                            }
-
-                            Spacer()
                         }
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -772,6 +798,32 @@ struct ProfileView: View {
         appleHealth.isConnected ? "Refresh" : "Connect"
     }
 
+    private func openTrend(for metric: String) {
+        Haptics.tap()
+        selectedTrendTarget = TrendSheetTarget(metric: metric)
+    }
+
+    private var doctorSummaryText: String {
+        let conditions = (profile?.conditions ?? []).joined(separator: ", ")
+        let allergies = (profile?.allergies ?? []).joined(separator: ", ")
+        let medicationsSummary = medications.prefix(4).map { "\($0.name) (\($0.doseText), \($0.scheduleText))" }.joined(separator: "\n")
+        let labsSummary = labs.prefix(4).map { "\($0.metric): \(metricValueText(for: $0)) \($0.unit) (\($0.status.displayName))" }.joined(separator: "\n")
+
+        var sections: [String] = []
+        sections.append("Patient: \(profile?.name ?? "Unknown")")
+        sections.append("Age/Sex: \(headerLine)")
+        sections.append("Conditions: \(conditions.isEmpty ? "None noted" : conditions)")
+        sections.append("Allergies: \(allergies.isEmpty ? "None noted" : allergies)")
+        sections.append("Active medications:\n\(medicationsSummary.isEmpty ? "None loaded" : medicationsSummary)")
+        sections.append("Recent labs:\n\(labsSummary.isEmpty ? "No labs loaded" : labsSummary)")
+
+        if appleHealth.isConnected {
+            sections.append("Apple Health snapshot: Steps \(appleHealth.snapshot.stepsText), Sleep \(appleHealth.snapshot.sleepText), Water \(appleHealth.snapshot.waterGoalText), Resting HR \(appleHealth.snapshot.restingHeartRateText)")
+        }
+
+        return sections.joined(separator: "\n\n")
+    }
+
     private var sharePanel: some View {
         panelCard(accent: Theme.Palette.peachTint, accentSize: 180, alignment: .topTrailing) {
             HStack(alignment: .center, spacing: 14) {
@@ -779,7 +831,7 @@ struct ProfileView: View {
                     Text("Share with doctor")
                         .font(Theme.Font.body(18, weight: .semibold))
                         .foregroundStyle(Theme.Palette.ink)
-                    Text("Create a short-lived packet from the health data already loaded here.")
+                    Text("Type what you want help with and Interval will turn it into a ready-to-send email draft.")
                         .font(Theme.Font.body(13, weight: .medium))
                         .foregroundStyle(Theme.Palette.inkSoft)
                 }
@@ -788,10 +840,11 @@ struct ProfileView: View {
 
                 Button {
                     Haptics.tap()
+                    showingDoctorComposer = true
                 } label: {
                     HStack(spacing: 6) {
-                        Text("Draft")
-                        Image(systemName: "arrow.right")
+                        Text("Draft email")
+                        Image(systemName: "envelope.fill")
                     }
                     .font(Theme.Font.body(14, weight: .semibold))
                     .foregroundStyle(.white)
@@ -819,14 +872,17 @@ struct ProfileView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .fill(Theme.Palette.card)
-                    .overlay(alignment: alignment) {
-                        Circle()
-                            .fill(accent.opacity(0.45))
-                            .frame(width: accentSize, height: accentSize)
-                            .offset(x: accentSize * 0.28, y: -accentSize * 0.28)
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Theme.Palette.card,
+                                Theme.Palette.card,
+                                accent.opacity(0.08)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
             )
             .overlay(
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
@@ -839,6 +895,7 @@ struct ProfileView: View {
 private struct MiniMetricCardModel: Identifiable {
     let id: String
     let title: String
+    let trendMetric: String?
     let value: String
     let unit: String?
     let caption: String
@@ -855,6 +912,399 @@ private struct RangeBarModel {
     let lowPosition: CGFloat
     let highPosition: CGFloat
     let valuePosition: CGFloat
+}
+
+private struct DoctorMailDraft: Identifiable {
+    let id = UUID()
+    let recipients: [String]
+    let subject: String
+    let body: String
+}
+
+private struct DoctorDraftSheet: View {
+    let summaryText: String
+    let suggestedDoctorName: String?
+    let patientName: String?
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var context
+
+    @State private var ai = IntervalAI()
+    @State private var recipientEmail = ""
+    @State private var requestText = ""
+    @State private var generatedSubject = ""
+    @State private var generatedBody = ""
+    @State private var isGenerating = false
+    @State private var errorMessage: String?
+    @State private var mailDraft: DoctorMailDraft?
+    @FocusState private var focusedField: Field?
+
+    private enum Field {
+        case email
+        case request
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Space.lg) {
+                    SectionHeader(
+                        eyebrow: "Doctor email",
+                        title: "Doctor draft",
+                        subtitle: "Type what you want help with and Interval will turn it into a polished email draft, then open Mail for you to send."
+                    )
+
+                    if let suggestedDoctorName, !suggestedDoctorName.isEmpty {
+                        HStack(spacing: 8) {
+                            Image(systemName: "stethoscope")
+                                .font(.system(size: 13, weight: .semibold))
+                            Text("Using \(suggestedDoctorName) as the most recent provider context.")
+                                .font(Theme.Font.body(13, weight: .medium))
+                        }
+                        .foregroundStyle(Theme.Palette.primary)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                .fill(Theme.Palette.primaryFixed)
+                        )
+                    }
+
+                    doctorField(
+                        title: "Send to",
+                        subtitle: "Doctor or clinic email",
+                        icon: "envelope.fill"
+                    ) {
+                        TextField("doctor@clinic.com", text: $recipientEmail)
+                            .font(Theme.Font.bodyText)
+                            .foregroundStyle(Theme.Palette.ink)
+                            .keyboardType(.emailAddress)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .submitLabel(.next)
+                            .focused($focusedField, equals: .email)
+                            .onSubmit {
+                                focusedField = .request
+                            }
+                    }
+
+                    doctorField(
+                        title: "What should Interval write?",
+                        subtitle: "Ask your question in plain language and Interval will turn it into a clean note.",
+                        icon: "sparkles"
+                    ) {
+                        ZStack(alignment: .topLeading) {
+                            if requestText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                Text("Example: I want to ask whether my recent A1C and iron results change anything about my current meds, and whether I need a follow-up visit.")
+                                    .font(Theme.Font.body(15, weight: .medium))
+                                    .foregroundStyle(Theme.Palette.inkMuted)
+                                    .padding(.top, 10)
+                                    .padding(.horizontal, 2)
+                            }
+
+                            TextEditor(text: $requestText)
+                                .font(Theme.Font.bodyText)
+                                .foregroundStyle(Theme.Palette.ink)
+                                .scrollContentBackground(.hidden)
+                                .frame(minHeight: 140)
+                                .focused($focusedField, equals: .request)
+                        }
+                    }
+
+                    if let errorMessage {
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: "exclamationmark.circle.fill")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(Theme.Palette.secondary)
+
+                            Text(errorMessage)
+                                .font(Theme.Font.body(13, weight: .medium))
+                                .foregroundStyle(Theme.Palette.inkSoft)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                .fill(Theme.Palette.secondaryFixed)
+                        )
+                    }
+
+                    if !generatedSubject.isEmpty || !generatedBody.isEmpty {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Draft preview")
+                                .font(Theme.Font.body(16, weight: .semibold))
+                                .foregroundStyle(Theme.Palette.ink)
+
+                            VStack(alignment: .leading, spacing: 12) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Subject")
+                                        .font(Theme.Font.body(11, weight: .semibold))
+                                        .tracking(0.8)
+                                        .foregroundStyle(Theme.Palette.inkMuted)
+                                        .textCase(.uppercase)
+                                    Text(generatedSubject)
+                                        .font(Theme.Font.body(15, weight: .semibold))
+                                        .foregroundStyle(Theme.Palette.ink)
+                                }
+
+                                Hairline(color: Theme.Palette.outlineVariant.opacity(0.75))
+
+                                Text(generatedBody)
+                                    .font(Theme.Font.body(14, weight: .medium))
+                                    .foregroundStyle(Theme.Palette.ink)
+                                    .textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .padding(Theme.Space.md)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
+                                    .fill(Theme.Palette.surfaceContainerLowest)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
+                                    .strokeBorder(Theme.Palette.outlineVariant.opacity(0.9), lineWidth: 1)
+                            )
+
+                            if MFMailComposeViewController.canSendMail() {
+                                Button {
+                                    Haptics.tap()
+                                    mailDraft = DoctorMailDraft(
+                                        recipients: [recipientEmail.trimmingCharacters(in: .whitespacesAndNewlines)],
+                                        subject: generatedSubject,
+                                        body: generatedBody
+                                    )
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "envelope.fill")
+                                        Text("Open in Mail again")
+                                    }
+                                    .font(Theme.Font.body(15, weight: .semibold))
+                                    .foregroundStyle(Theme.Palette.primary)
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 11)
+                                    .background(
+                                        Capsule().fill(Theme.Palette.primaryFixed)
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+
+                    PrimaryButton(
+                        title: isGenerating ? "Writing draft..." : "Create email",
+                        icon: isGenerating ? nil : "envelope.fill",
+                        enabled: !isGenerating
+                    ) {
+                        createDraft()
+                    }
+                }
+                .padding(.horizontal, Theme.Space.lg)
+                .padding(.top, Theme.Space.md)
+                .padding(.bottom, Theme.Space.xl)
+            }
+            .background(Theme.Palette.paper)
+            .navigationBarTitleDisplayMode(.inline)
+            .task {
+                ai.prepare(with: context)
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                    .font(Theme.Font.body(14, weight: .semibold))
+                    .foregroundStyle(Theme.Palette.primary)
+                }
+            }
+        }
+        .sheet(item: $mailDraft) { draft in
+            DoctorMailComposeView(draft: draft) { result in
+                switch result {
+                case .sent:
+                    Haptics.success()
+                    dismiss()
+                case .failed(let error):
+                    errorMessage = error.localizedDescription
+                    Haptics.error()
+                case .cancelled, .saved:
+                    break
+                }
+            }
+        }
+    }
+
+    private func doctorField<Content: View>(
+        title: String,
+        subtitle: String,
+        icon: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.Palette.primary)
+                Text(title)
+                    .font(Theme.Font.body(15, weight: .semibold))
+                    .foregroundStyle(Theme.Palette.ink)
+            }
+
+            Text(subtitle)
+                .font(Theme.Font.body(13, weight: .medium))
+                .foregroundStyle(Theme.Palette.inkSoft)
+
+            content()
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
+                        .fill(Theme.Palette.surfaceContainerLowest)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
+                        .strokeBorder(Theme.Palette.outlineVariant.opacity(0.9), lineWidth: 1)
+                )
+        }
+        .padding(Theme.Space.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
+                .fill(Theme.Palette.surfaceContainerLow)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous)
+                .strokeBorder(Theme.Palette.outlineVariant.opacity(0.7), lineWidth: 1)
+        )
+    }
+
+    private func createDraft() {
+        let email = recipientEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+        let request = requestText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard isValidEmail(email) else {
+            errorMessage = "Add the doctor's email first so Interval knows where to send the draft."
+            focusedField = .email
+            Haptics.warning()
+            return
+        }
+
+        guard !request.isEmpty else {
+            errorMessage = "Tell Interval what you want the email to say."
+            focusedField = .request
+            Haptics.warning()
+            return
+        }
+
+        errorMessage = nil
+        isGenerating = true
+        Haptics.tap()
+
+        Task {
+            let draft = await ai.generateDoctorDraft(
+                request: request,
+                summary: summaryText,
+                doctorName: suggestedDoctorName,
+                patientName: patientName
+            )
+
+            await MainActor.run {
+                generatedSubject = draft.subject
+                generatedBody = draft.body
+                isGenerating = false
+
+                guard MFMailComposeViewController.canSendMail() else {
+                    errorMessage = "Mail isn't set up on this device yet. Your draft is ready below to review."
+                    Haptics.warning()
+                    return
+                }
+
+                mailDraft = DoctorMailDraft(
+                    recipients: [email],
+                    subject: draft.subject,
+                    body: draft.body
+                )
+            }
+        }
+    }
+
+    private func isValidEmail(_ value: String) -> Bool {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.contains("@") && trimmed.contains(".")
+    }
+}
+
+private struct DoctorMailComposeView: UIViewControllerRepresentable {
+    enum Result {
+        case sent
+        case saved
+        case cancelled
+        case failed(Error)
+    }
+
+    let draft: DoctorMailDraft
+    let onFinish: (Result) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(dismiss: dismiss, onFinish: onFinish)
+    }
+
+    func makeUIViewController(context: Context) -> MFMailComposeViewController {
+        let composer = MFMailComposeViewController()
+        composer.mailComposeDelegate = context.coordinator
+        composer.setToRecipients(draft.recipients)
+        composer.setSubject(draft.subject)
+        composer.setMessageBody(draft.body, isHTML: false)
+        return composer
+    }
+
+    func updateUIViewController(_ uiViewController: MFMailComposeViewController, context: Context) {}
+
+    final class Coordinator: NSObject, MFMailComposeViewControllerDelegate {
+        private let dismiss: DismissAction
+        private let onFinish: (Result) -> Void
+
+        init(dismiss: DismissAction, onFinish: @escaping (Result) -> Void) {
+            self.dismiss = dismiss
+            self.onFinish = onFinish
+        }
+
+        func mailComposeController(
+            _ controller: MFMailComposeViewController,
+            didFinishWith result: MFMailComposeResult,
+            error: Error?
+        ) {
+            dismiss()
+
+            if let error {
+                onFinish(.failed(error))
+                return
+            }
+
+            switch result {
+            case .cancelled:
+                onFinish(.cancelled)
+            case .saved:
+                onFinish(.saved)
+            case .sent:
+                onFinish(.sent)
+            case .failed:
+                onFinish(.failed(NSError(
+                    domain: "DoctorMailComposeView",
+                    code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: "Mail couldn't finish sending the draft."]
+                )))
+            @unknown default:
+                onFinish(.cancelled)
+            }
+        }
+    }
 }
 
 extension ScheduleKind {

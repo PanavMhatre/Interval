@@ -2,6 +2,15 @@ import Foundation
 import FoundationModels
 import SwiftData
 
+@Generable
+struct DoctorEmailDraftContent {
+    @Guide(description: "A concise email subject line, 3 to 8 words, plain language, no quotes.")
+    var subject: String
+
+    @Guide(description: "A ready-to-send email body in first person from the patient. Keep it concise, grounded in the provided request and summary, and avoid markdown.")
+    var body: String
+}
+
 /// Grounds Foundation Models with the user's medical profile and wraps
 /// `LanguageModelSession` with availability checks + a fallback path.
 @MainActor
@@ -57,6 +66,71 @@ final class IntervalAI {
 
     var isResponding: Bool { session?.isResponding ?? false }
 
+    func generateDoctorDraft(
+        request: String,
+        summary: String,
+        doctorName: String?,
+        patientName: String?
+    ) async -> DoctorEmailDraftContent {
+        let cleanedRequest = request.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanedSummary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !cleanedRequest.isEmpty else {
+            return Self.fallbackDoctorDraft(
+                request: cleanedRequest,
+                summary: cleanedSummary,
+                doctorName: doctorName,
+                patientName: patientName
+            )
+        }
+
+        switch model.availability {
+        case .available:
+            let session = LanguageModelSession(instructions: Self.doctorDraftInstructions)
+            let prompt = """
+            PATIENT NAME: \(patientName ?? "The patient")
+            DOCTOR NAME: \(doctorName ?? "Doctor")
+
+            WHAT THE PATIENT WANTS TO SAY:
+            \(cleanedRequest)
+
+            HEALTH SUMMARY TO USE AS FACTUAL CONTEXT:
+            \(cleanedSummary)
+            """
+
+            do {
+                let response = try await session.respond(to: prompt, generating: DoctorEmailDraftContent.self)
+                let subject = response.content.subject.trimmingCharacters(in: .whitespacesAndNewlines)
+                let body = response.content.body.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                guard !subject.isEmpty, !body.isEmpty else {
+                    return Self.fallbackDoctorDraft(
+                        request: cleanedRequest,
+                        summary: cleanedSummary,
+                        doctorName: doctorName,
+                        patientName: patientName
+                    )
+                }
+
+                return DoctorEmailDraftContent(subject: subject, body: body)
+            } catch {
+                return Self.fallbackDoctorDraft(
+                    request: cleanedRequest,
+                    summary: cleanedSummary,
+                    doctorName: doctorName,
+                    patientName: patientName
+                )
+            }
+        case .unavailable:
+            return Self.fallbackDoctorDraft(
+                request: cleanedRequest,
+                summary: cleanedSummary,
+                doctorName: doctorName,
+                patientName: patientName
+            )
+        }
+    }
+
     // MARK: - Instructions
 
     private static func buildInstructions(context: ModelContext) -> String {
@@ -109,6 +183,19 @@ final class IntervalAI {
         """
     }
 
+    private static var doctorDraftInstructions: String {
+        """
+        You write concise, warm emails from a patient to a clinician.
+        Write in first person as the patient.
+        Keep the email easy to scan and medically grounded.
+        Do not invent facts, symptoms, dates, or medication details not present in the request or summary.
+        Focus on the patient's ask first, then include only the most relevant context.
+        Keep the subject line short.
+        Keep the body to 1 to 3 short paragraphs, or one short paragraph plus a compact context list if helpful.
+        Do not use markdown headings, tables, or exaggerated urgency.
+        """
+    }
+
     // MARK: - Helpers
 
     private static var fallbackError: Error {
@@ -124,5 +211,58 @@ final class IntervalAI {
         case .modelNotReady:           "Interval's model is still downloading. Check back in a minute."
         @unknown default:              "Apple Intelligence isn't available right now."
         }
+    }
+
+    private static func fallbackDoctorDraft(
+        request: String,
+        summary: String,
+        doctorName: String?,
+        patientName: String?
+    ) -> DoctorEmailDraftContent {
+        let trimmedRequest = request.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lines = summary
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let contextLines = Array(lines.prefix(4))
+        let greetingName = doctorName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? doctorName! : "Doctor"
+        let senderName = patientName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? patientName! : "Patient"
+        let greetingLine: String = {
+            let lower = greetingName.lowercased()
+            if lower.hasPrefix("dr.") || lower.hasPrefix("doctor ") {
+                return "Hi \(greetingName),"
+            }
+            return "Hi Dr. \(greetingName),"
+        }()
+
+        let subjectSource = trimmedRequest.isEmpty ? "follow up question" : trimmedRequest
+        let subjectWords = subjectSource
+            .split(whereSeparator: { $0.isWhitespace || $0.isNewline })
+            .prefix(6)
+            .map(String.init)
+        let subject = subjectWords.isEmpty
+            ? "Health follow-up"
+            : subjectWords.joined(separator: " ").capitalized
+
+        var bodySections: [String] = []
+        bodySections.append(greetingLine)
+
+        if trimmedRequest.isEmpty {
+            bodySections.append("I wanted to follow up with a quick question about my recent health records in Interval.")
+        } else {
+            bodySections.append("I'm reaching out through Interval with a quick question: \(trimmedRequest)")
+        }
+
+        if !contextLines.isEmpty {
+            let formattedContext = contextLines.map { "- \($0)" }.joined(separator: "\n")
+            bodySections.append("A few relevant details from my record:\n\(formattedContext)")
+        }
+
+        bodySections.append("Thank you,\n\(senderName)")
+
+        return DoctorEmailDraftContent(
+            subject: subject,
+            body: bodySections.joined(separator: "\n\n")
+        )
     }
 }

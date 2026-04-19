@@ -85,6 +85,7 @@ struct ChatView: View {
     @State private var draft: String = ""
     @State private var responding = false
     @State private var showingLoadedSummary = false
+    @State private var loadedSummaryHeight: CGFloat = 0
     @FocusState private var inputFocused: Bool
 
     private var profile: UserProfile? { profiles.first }
@@ -139,10 +140,10 @@ struct ChatView: View {
     }
 
     private var contextPreamble: some View {
-        VStack(alignment: .leading, spacing: showingLoadedSummary ? 14 : 0) {
+        VStack(alignment: .leading, spacing: 0) {
             Button {
                 Haptics.select()
-                withAnimation(.smooth(duration: 0.22)) {
+                withAnimation(.smooth(duration: 0.34, extraBounce: 0)) {
                     showingLoadedSummary.toggle()
                 }
             } label: {
@@ -160,10 +161,11 @@ struct ChatView: View {
 
                     Spacer()
 
-                    Image(systemName: showingLoadedSummary ? "chevron.up" : "chevron.down")
+                    Image(systemName: "chevron.down")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(Theme.Palette.coralDeep)
                         .frame(width: 32, height: 32)
+                        .rotationEffect(.degrees(showingLoadedSummary ? 180 : 0))
                         .background(
                             RoundedRectangle(cornerRadius: 12, style: .continuous)
                                 .fill(Theme.Palette.surfaceContainerLowest)
@@ -176,28 +178,45 @@ struct ChatView: View {
             }
             .buttonStyle(.plain)
 
-            if showingLoadedSummary {
-                VStack(alignment: .leading, spacing: 12) {
-                    Hairline(color: Theme.Palette.outlineVariant.opacity(0.8))
-
-                    Text(contextSummaryText)
-                        .font(Theme.Font.body(14, weight: .medium))
-                        .foregroundStyle(Theme.Palette.ink)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        contextSummaryRow("Conditions", value: conditionsSummary)
-                        contextSummaryRow("Allergies", value: allergiesSummary)
-                        contextSummaryRow("Medications", value: medicationsSummary)
-                        contextSummaryRow("Latest lab", value: latestLabSummary)
+            loadedSummaryContent
+                .background(
+                    GeometryReader { proxy in
+                        Color.clear
+                            .preference(key: ChatMeasuredHeightKey.self, value: proxy.size.height)
                     }
-                }
-                .transition(.move(edge: .top).combined(with: .opacity))
-            }
+                )
+                .frame(height: showingLoadedSummary ? max(loadedSummaryHeight, 1) : 0, alignment: .top)
+                .clipped()
+                .opacity(showingLoadedSummary ? 1 : 0)
+                .offset(y: showingLoadedSummary ? 0 : -8)
+                .allowsHitTesting(showingLoadedSummary)
+        }
+        .onPreferenceChange(ChatMeasuredHeightKey.self) { height in
+            guard height > 0 else { return }
+            loadedSummaryHeight = height
         }
         .padding(Theme.Space.md)
         .frame(maxWidth: .infinity, alignment: .leading)
         .softCard(fill: Theme.Palette.paperSoft)
+    }
+
+    private var loadedSummaryContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Hairline(color: Theme.Palette.outlineVariant.opacity(0.8))
+
+            Text(contextSummaryText)
+                .font(Theme.Font.body(14, weight: .medium))
+                .foregroundStyle(Theme.Palette.ink)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 10) {
+                contextSummaryRow("Conditions", value: conditionsSummary)
+                contextSummaryRow("Allergies", value: allergiesSummary)
+                contextSummaryRow("Medications", value: medicationsSummary)
+                contextSummaryRow("Latest lab", value: latestLabSummary)
+            }
+        }
+        .padding(.top, 14)
     }
 
     private func unavailableBanner(_ msg: String) -> some View {
@@ -224,36 +243,37 @@ struct ChatView: View {
             VStack(alignment: .leading, spacing: 10) {
                 if msg.text.isEmpty && msg.isStreaming {
                     thinkingDots
-                } else {
+                } else if !msg.text.isEmpty {
                     assistantMessageCard(msg.text)
                         .animation(.smooth(duration: 0.18), value: msg.text)
                 }
 
                 if !msg.chips.isEmpty {
-                    FlowLayout(spacing: 8) {
-                        ForEach(msg.chips, id: \.self) { chip in
-                            Button {
-                                Haptics.select()
-                                send(chip)
-                            } label: {
-                                Text(chip)
-                                    .font(Theme.Font.body(12, weight: .semibold))
-                                    .foregroundStyle(Theme.Palette.ink)
-                                    .lineLimit(2)
-                                    .multilineTextAlignment(.leading)
-                                    .frame(maxWidth: 150, alignment: .leading)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 9)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                            .fill(Theme.Palette.surfaceContainerLowest)
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                            .strokeBorder(Theme.Palette.outlineVariant, lineWidth: 1)
-                                    )
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(msg.chips, id: \.self) { chip in
+                                Button {
+                                    Haptics.select()
+                                    send(chip)
+                                } label: {
+                                    Text(chip)
+                                        .font(Theme.Font.body(12, weight: .semibold))
+                                        .foregroundStyle(Theme.Palette.ink)
+                                        .lineLimit(1)
+                                        .fixedSize(horizontal: true, vertical: false)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 9)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                                .fill(Theme.Palette.surfaceContainerLowest)
+                                        )
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                                .strokeBorder(Theme.Palette.outlineVariant, lineWidth: 1)
+                                        )
+                                }
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -344,11 +364,10 @@ struct ChatView: View {
     // MARK: Conversation
 
     private func seed() {
-        let firstName = profile?.name.components(separatedBy: " ").first ?? "there"
         messages = [
             ChatMessage(
                 sender: .ai,
-                text: "Hi \(firstName). I have your latest conditions, meds, and labs loaded.\n\nAsk me anything.",
+                text: "",
                 chips: ["What does my A1C mean?", "Any risky meds?", "Am I low on iron?"]
             )
         ]
@@ -1305,6 +1324,14 @@ struct ChatView: View {
 
         Tell me what you want to focus on and I will break it down clearly.
         """
+    }
+}
+
+private struct ChatMeasuredHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 
