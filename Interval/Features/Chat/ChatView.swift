@@ -147,7 +147,15 @@ struct ChatView: View {
                     }
                     .padding(.horizontal, Theme.Space.lg)
                     .padding(.vertical, Theme.Space.md)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
+                .scrollDismissesKeyboard(.interactively)
+                .simultaneousGesture(
+                    TapGesture().onEnded {
+                        inputFocused = false
+                    }
+                )
                 .onChange(of: messages.count) {
                     withAnimation(.smooth) { proxy.scrollTo(messages.last?.id, anchor: .bottom) }
                 }
@@ -347,11 +355,6 @@ struct ChatView: View {
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                // ── Feature 2: Source chips ───────────────────────────────
-                if !msg.isStreaming && !msg.sources.isEmpty {
-                    sourceChipsRow(msg.sources)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -932,17 +935,31 @@ struct ChatView: View {
     // MARK: - Existing graphic card builders (unchanged)
 
     private func assistantMessageCard(_ text: String, showsDisclaimerIcon: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            ForEach(messageBlocks(from: text)) { block in
+        let blocks = messageBlocks(from: text)
+        let trailingParagraph: String? = {
+            guard showsDisclaimerIcon, let last = blocks.last else { return nil }
+            if case .paragraph(let value) = last { return value }
+            return nil
+        }()
+        let leadingBlocks = trailingParagraph == nil ? blocks : Array(blocks.dropLast())
+
+        return VStack(alignment: .leading, spacing: 14) {
+            ForEach(leadingBlocks) { block in
                 blockView(block)
             }
 
-            if showsDisclaimerIcon {
-                HStack {
+            if let trailingParagraph {
+                HStack(alignment: .center, spacing: 10) {
+                    paragraphText(trailingParagraph)
+                        .foregroundStyle(Theme.Palette.ink)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     disclaimerChip
-                    Spacer()
                 }
-                .padding(.top, 2)
+            } else if showsDisclaimerIcon {
+                HStack {
+                    Spacer()
+                    disclaimerChip
+                }
             }
         }
         .frame(maxWidth: 320, alignment: .leading)
@@ -1338,15 +1355,42 @@ struct ChatView: View {
     }
 
     private func interactionSummary(primary: String, secondary: String) -> (risk: String, body: String, nextStep: String, fill: Color, accent: Color) {
-        let pair = [normalizedToken(primary), normalizedToken(secondary)]
-        if pair.contains("ibuprofen"), pair.contains("lisinopril") {
-            return ("Careful", "This pair can push blood pressure up and add kidney stress if it becomes a repeated pattern.",
-                    "Short-term use is the safer case. Spacing it out, staying hydrated, and checking with a clinician is the best next move.",
-                    Theme.Palette.secondaryFixed, Theme.Palette.secondary)
+        if let issue = MedicationSafetyEngine.interactionIssue(primary: primary, secondary: secondary, profile: profile) {
+            switch issue.severity {
+            case .low:
+                return (
+                    issue.severity.label,
+                    issue.summary,
+                    issue.recommendation,
+                    Theme.Palette.primaryFixed,
+                    Theme.Palette.primary
+                )
+            case .moderate:
+                return (
+                    issue.severity.label,
+                    issue.summary,
+                    issue.recommendation,
+                    Theme.Palette.secondaryFixed,
+                    Theme.Palette.secondary
+                )
+            case .high:
+                return (
+                    issue.severity.label,
+                    issue.summary,
+                    issue.recommendation,
+                    Theme.Palette.errorContainer,
+                    Theme.Palette.error
+                )
+            }
         }
-        return ("Review", "This combination is worth double-checking before you make it part of your routine.",
-                "Use the chart as a prompt to confirm the pair with your pharmacist or clinician.",
-                Theme.Palette.surfaceContainerHigh, Theme.Palette.ink)
+
+        return (
+            "Clear",
+            "I did not find a direct medication-pair or allergy warning for this pair in the current quick-check rules.",
+            "If either medication is new or temporary, it is still smart to confirm it with a pharmacist.",
+            Theme.Palette.primaryFixed,
+            Theme.Palette.primary
+        )
     }
 
     // MARK: - Response decoration (unchanged)
@@ -1395,9 +1439,30 @@ struct ChatView: View {
         return medications.first { let n = normalizedToken($0.name); if h.contains(n) { return true }; if let b = $0.brand { return h.contains(normalizedToken(b)) }; return false }
     }
     private func suggestedInteractionPair(for prompt: String, response: String) -> (primary: String, secondary: String)? {
-        let h = normalizedToken(prompt + " " + response)
-        if h.contains("ibuprofen"), medications.contains(where: { normalizedToken($0.name).contains("lisinopril") }) { return ("Ibuprofen", "Lisinopril") }
-        return nil
+        let mentioned = Array(NSOrderedSet(array: MedicationSafetyEngine.medicationNamesMentioned(
+            in: prompt + " " + response,
+            currentMedications: medications
+        ))) as? [String] ?? []
+
+        var best: (primary: String, secondary: String, severity: MedicationInteractionSeverity)?
+
+        for index in mentioned.indices {
+            for nextIndex in mentioned.indices where nextIndex > index {
+                let primary = mentioned[index]
+                let secondary = mentioned[nextIndex]
+                guard let issue = MedicationSafetyEngine.interactionIssue(
+                    primary: primary,
+                    secondary: secondary,
+                    profile: profile
+                ) else { continue }
+
+                if best == nil || issue.severity > best!.severity {
+                    best = (primary, secondary, issue.severity)
+                }
+            }
+        }
+
+        return best.map { ($0.primary, $0.secondary) }
     }
     private func shouldShowSimulation(for prompt: String, response: String) -> Bool {
         let h = normalizedToken(prompt + " " + response)

@@ -12,10 +12,28 @@ struct DoctorEmailDraftContent {
     @Guide(description: "A ready-to-send email body in first person from the patient. Keep it concise, grounded in the provided request and summary, and avoid markdown.")
     var body: String
 }
+
+@Generable
+struct InteractionReviewContent {
+    @Guide(description: "A short 2 to 5 word verdict for the interaction review.")
+    var headline: String
+
+    @Guide(description: "One short plain-language paragraph grounded only in the provided safety findings.")
+    var summary: String
+
+    @Guide(description: "One short next-step sentence for the patient.")
+    var nextStep: String
+}
 #else
 struct DoctorEmailDraftContent {
     var subject: String
     var body: String
+}
+
+struct InteractionReviewContent {
+    var headline: String
+    var summary: String
+    var nextStep: String
 }
 #endif
 
@@ -168,6 +186,74 @@ final class IntervalAI {
 #endif
     }
 
+    func generateInteractionReview(
+        candidateName: String,
+        checkedMedications: [String],
+        allergies: [String],
+        issues: [MedicationInteractionIssue]
+    ) async -> InteractionReviewContent {
+        guard let topIssue = issues.sorted(by: { $0.severity > $1.severity }).first else {
+            let checked = checkedMedications.isEmpty ? "your current list" : checkedMedications.joined(separator: ", ")
+            return InteractionReviewContent(
+                headline: "All clear",
+                summary: "I did not find a direct medication-pair or allergy conflict for \(candidateName) against \(checked).",
+                nextStep: "You can still confirm the choice with a pharmacist if this is brand new for you."
+            )
+        }
+
+#if canImport(FoundationModels)
+        switch model.availability {
+        case .available:
+            let session = LanguageModelSession(instructions: Self.interactionReviewInstructions)
+            let findings = issues.enumerated().map { index, issue in
+                """
+                \(index + 1). Pair: \(issue.primary.displayName) + \(issue.secondary.displayName)
+                Severity: \(issue.severity.label)
+                Title: \(issue.title)
+                Summary: \(issue.summary)
+                Recommendation: \(issue.recommendation)
+                Source: \(issue.source)
+                """
+            }.joined(separator: "\n\n")
+
+            let prompt = """
+            NEW MEDICATION:
+            \(candidateName)
+
+            CURRENT MEDICATIONS CHECKED:
+            \(checkedMedications.isEmpty ? "None listed." : checkedMedications.joined(separator: ", "))
+
+            PROFILE ALLERGIES:
+            \(allergies.isEmpty ? "None listed." : allergies.joined(separator: ", "))
+
+            VERIFIED SAFETY FINDINGS:
+            \(findings)
+            """
+
+            do {
+                let response = try await session.respond(to: prompt, generating: InteractionReviewContent.self)
+                let headline = response.content.headline.trimmingCharacters(in: .whitespacesAndNewlines)
+                let summary = response.content.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+                let nextStep = response.content.nextStep.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                if !headline.isEmpty, !summary.isEmpty, !nextStep.isEmpty {
+                    return InteractionReviewContent(
+                        headline: headline,
+                        summary: summary,
+                        nextStep: nextStep
+                    )
+                }
+            } catch {
+                break
+            }
+        case .unavailable:
+            break
+        }
+#endif
+
+        return Self.fallbackInteractionReview(candidateName: candidateName, issue: topIssue)
+    }
+
     // MARK: - Shared Helpers
 
     private static func buildInstructions(context: ModelContext) -> String {
@@ -244,6 +330,15 @@ final class IntervalAI {
         """
     }
 
+    private static var interactionReviewInstructions: String {
+        """
+        You summarize verified medication safety findings for a patient in very plain language.
+        You are not determining whether an interaction exists. That has already been checked.
+        Never invent a new risk, medication, allergy, or instruction.
+        Keep it calm, short, and practical.
+        """
+    }
+
     private static var fallbackError: Error {
         NSError(domain: "IntervalAI", code: -1, userInfo: [
             NSLocalizedDescriptionKey: "Apple Intelligence isn't available on this device."
@@ -300,6 +395,17 @@ final class IntervalAI {
         return DoctorEmailDraftContent(
             subject: subject,
             body: bodySections.joined(separator: "\n\n")
+        )
+    }
+
+    private static func fallbackInteractionReview(
+        candidateName: String,
+        issue: MedicationInteractionIssue
+    ) -> InteractionReviewContent {
+        InteractionReviewContent(
+            headline: issue.severity == .high ? "Needs a closer look" : "Worth reviewing",
+            summary: "\(candidateName) needs a quick check because \(issue.summary.lowercased())",
+            nextStep: issue.recommendation
         )
     }
 }

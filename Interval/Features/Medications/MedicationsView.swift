@@ -52,56 +52,6 @@ private struct DoseIntakeTag: Identifiable {
     let icon: String
 }
 
-// MARK: - Drug Interaction Types
-
-private enum InteractionSeverity {
-    case timingConflict
-    case noConflict
-}
-
-private struct DrugInteraction: Identifiable {
-    let id = UUID()
-    let med1Name: String
-    let med2Name: String
-    let severity: InteractionSeverity
-    let description: String
-    let timingGapHours: Int?
-    let med1SuggestedTime: String?
-    let med2SuggestedTime: String?
-}
-
-private struct KnownInteractionEntry {
-    let keywords1: [String]
-    let keywords2: [String]
-    let severity: InteractionSeverity
-    let description: String
-    let timingGapHours: Int?
-}
-
-private let knownInteractionDB: [KnownInteractionEntry] = [
-    KnownInteractionEntry(
-        keywords1: ["levothyroxine", "synthroid", "thyroid"],
-        keywords2: ["iron", "ferrous"],
-        severity: .timingConflict,
-        description: "Iron reduces levothyroxine absorption by up to 40%. Your current schedule has them too close together.",
-        timingGapHours: 4
-    ),
-    KnownInteractionEntry(
-        keywords1: ["lisinopril"],
-        keywords2: ["iron", "ferrous"],
-        severity: .timingConflict,
-        description: "Iron may reduce lisinopril absorption. Separate by at least 2 hours for optimal effect.",
-        timingGapHours: 2
-    ),
-    KnownInteractionEntry(
-        keywords1: ["warfarin", "coumadin"],
-        keywords2: ["ibuprofen", "aspirin", "naproxen"],
-        severity: .timingConflict,
-        description: "NSAIDs can increase the risk of bleeding when taken with blood thinners.",
-        timingGapHours: nil
-    ),
-]
-
 // MARK: - Main View
 
 struct MedicationsView: View {
@@ -111,6 +61,10 @@ struct MedicationsView: View {
 
     @State private var selectedTab: MedsTab = .schedule
     @State private var showAdd = false
+    @State private var isAddingReminders = false
+    @State private var reminderFeedback: ReminderFeedback?
+    @State private var reminderAlert: ReminderAlert?
+    @State private var interactionActionMessage: String?
 
     // MARK: Computed
 
@@ -145,50 +99,86 @@ struct MedicationsView: View {
     private var takenCount: Int  { todaysDoses.filter { $0.status == .taken  }.count }
     private var dueNowCount: Int { todaysDoses.filter { $0.status == .dueNow }.count }
     private var totalCount: Int  { todaysDoses.count }
+    private var remainingDoseCount: Int { todaysDoses.filter { $0.status != .taken }.count }
 
-    private var interactions: [DrugInteraction] {
-        var results: [DrugInteraction] = []
-        let meds = medications
-        for i in 0..<meds.count {
-            for j in (i + 1)..<meds.count {
-                let m1 = meds[i]; let m2 = meds[j]
-                let n1 = m1.name.lowercased(); let n2 = m2.name.lowercased()
+    private var reminderDrafts: [MedicationReminderDraft] {
+        todaysDoses
+            .filter { $0.status != .taken }
+            .map { dose in
+                let noteLines = [
+                    dose.detailText,
+                    dose.intakeTags.map(\.title).joined(separator: " • "),
+                    "Scheduled for \(formattedReminderTime(for: dose.scheduledTime))",
+                    "Added from Interval"
+                ]
+                .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
-                if let entry = knownInteractionDB.first(where: { e in
-                    (e.keywords1.contains { n1.contains($0) } && e.keywords2.contains { n2.contains($0) }) ||
-                    (e.keywords1.contains { n2.contains($0) } && e.keywords2.contains { n1.contains($0) })
-                }) {
-                    let isForward = entry.keywords1.contains { n1.contains($0) }
-                    let dm1 = isForward ? m1 : m2
-                    let dm2 = isForward ? m2 : m1
-
-                    let t1 = dm1.preferredTimes.first ?? "Morning"
-                    let t2: String
-                    if let gap = entry.timingGapHours,
-                       let base = dm1.preferredTimes.first.flatMap(Self.parseTime) {
-                        let suggested = base.addingTimeInterval(Double(gap) * 3600)
-                        let fmt = DateFormatter(); fmt.dateFormat = "h:mm a"
-                        t2 = fmt.string(from: suggested)
-                    } else {
-                        t2 = dm2.preferredTimes.first ?? "Later"
-                    }
-
-                    results.append(DrugInteraction(
-                        med1Name: dm1.name, med2Name: dm2.name,
-                        severity: entry.severity, description: entry.description,
-                        timingGapHours: entry.timingGapHours,
-                        med1SuggestedTime: t1, med2SuggestedTime: t2
-                    ))
-                } else {
-                    results.append(DrugInteraction(
-                        med1Name: m1.name, med2Name: m2.name,
-                        severity: .noConflict, description: "No known interaction.",
-                        timingGapHours: nil, med1SuggestedTime: nil, med2SuggestedTime: nil
-                    ))
-                }
+                return MedicationReminderDraft(
+                    title: "Take \(dose.medication.name)",
+                    notes: noteLines.joined(separator: "\n"),
+                    scheduledTime: dose.scheduledTime,
+                    isUrgent: dose.status == .dueNow
+                )
             }
+    }
+
+    private var interactionReport: MedicationSafetyReport {
+        MedicationSafetyEngine.analyzeCurrentMedications(medications)
+    }
+
+    private var showcaseInteractionIssue: MedicationInteractionIssue? {
+        guard interactionReport.issues.isEmpty else { return nil }
+
+        if let ironMedication = medications.first(where: { $0.name.localizedCaseInsensitiveContains("iron") }) {
+            let ironDescriptor = MedicationSafetyDescriptor(ironMedication)
+            let anchorTime = ironMedication.preferredTimes.first ?? "8:00 AM"
+            let suggestedTime = shiftedTimeString(from: anchorTime, byAddingHours: 2) ?? "10:00 AM"
+
+            return MedicationInteractionIssue(
+                id: "showcase-iron-calcium-\(ironDescriptor.id)",
+                primary: MedicationSafetyDescriptor.candidate(name: "Calcium", brand: "Supplement", doseText: "500 mg"),
+                secondary: ironDescriptor,
+                severity: .moderate,
+                kind: .timing,
+                title: "Minerals can crowd out iron",
+                summary: "Calcium and multivitamins can reduce how much iron absorbs when they land too close to your iron dose.",
+                recommendation: "Keep your iron at least 2 hours away from calcium or multivitamins so it has a cleaner absorption window.",
+                source: "Daily supplement timing",
+                scheduleAdjustment: MedicationScheduleAdjustment(
+                    targetMedicationID: ironDescriptor.id,
+                    targetMedicationName: ironDescriptor.displayName,
+                    anchorMedicationName: "Calcium or multivitamin",
+                    anchorTime: anchorTime,
+                    suggestedTime: suggestedTime,
+                    minimumGapHours: 2
+                )
+            )
         }
-        return results
+
+        if medications.contains(where: { $0.name.localizedCaseInsensitiveContains("lisinopril") }) {
+            return MedicationInteractionIssue(
+                id: "showcase-lisinopril-ibuprofen",
+                primary: MedicationSafetyDescriptor.candidate(name: "Ibuprofen", doseText: "200 mg"),
+                secondary: MedicationSafetyDescriptor.candidate(name: "Lisinopril", doseText: "10 mg"),
+                severity: .moderate,
+                kind: .monitoring,
+                title: "Kidney and blood-pressure caution",
+                summary: "Ibuprofen can blunt the blood-pressure effect of lisinopril and add kidney stress if it becomes a repeated pattern.",
+                recommendation: "Keep this in mind before adding routine ibuprofen, and check with a clinician if it starts becoming frequent.",
+                source: "Curated medication-safety rules",
+                scheduleAdjustment: nil
+            )
+        }
+
+        return nil
+    }
+
+    private var interactionIssuesToShow: [MedicationInteractionIssue] {
+        if !interactionReport.issues.isEmpty {
+            return interactionReport.issues
+        }
+
+        return showcaseInteractionIssue.map { [$0] } ?? []
     }
 
     // MARK: Body
@@ -221,6 +211,13 @@ struct MedicationsView: View {
             NavigationStack { AddMedicationView() }
                 .presentationDetents([.large])
         }
+        .alert(item: $reminderAlert) { reminderAlert in
+            Alert(
+                title: Text(reminderAlert.title),
+                message: Text(reminderAlert.message),
+                dismissButton: .default(Text("OK"))
+            )
+        }
     }
 
     // MARK: - Background
@@ -236,27 +233,91 @@ struct MedicationsView: View {
     // MARK: - Header
 
     private var headerSection: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(dayDateLabel)
-                .font(Theme.Font.body(11, weight: .semibold))
-                .tracking(1.2)
-                .foregroundStyle(Theme.Palette.sageDeep)
-                .textCase(.uppercase)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: Theme.Space.md) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(dayDateLabel)
+                        .font(Theme.Font.body(11, weight: .semibold))
+                        .tracking(1.2)
+                        .foregroundStyle(Theme.Palette.sageDeep)
+                        .textCase(.uppercase)
 
-            Text("Medications")
-                .font(Theme.Font.display(34, weight: .bold))
-                .foregroundStyle(Theme.Palette.ink)
+                    Text("Medications")
+                        .font(Theme.Font.display(34, weight: .bold))
+                        .foregroundStyle(Theme.Palette.ink)
 
-            HStack(spacing: 4) {
-                Text("\(takenCount) taken")
-                    .foregroundStyle(Theme.Palette.sageDeep)
-                Text("·")
-                    .foregroundStyle(Theme.Palette.inkMuted)
-                Text("\(max(0, totalCount - takenCount)) remaining today")
-                    .foregroundStyle(Theme.Palette.inkSoft)
+                    HStack(spacing: 4) {
+                        Text("\(takenCount) taken")
+                            .foregroundStyle(Theme.Palette.sageDeep)
+                        Text("·")
+                            .foregroundStyle(Theme.Palette.inkMuted)
+                        Text("\(max(0, totalCount - takenCount)) remaining today")
+                            .foregroundStyle(Theme.Palette.inkSoft)
+                    }
+                    .font(Theme.Font.body(14, weight: .semibold))
+                }
+
+                Spacer(minLength: Theme.Space.sm)
+
+                quickReminderButton
             }
-            .font(Theme.Font.body(14, weight: .semibold))
+
+            if let reminderFeedback {
+                HStack(spacing: 8) {
+                    Image(systemName: reminderFeedback.icon)
+                        .font(.system(size: 11, weight: .bold))
+                    Text(reminderFeedback.message)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                }
+                .font(Theme.Font.body(12, weight: .semibold))
+                .foregroundStyle(reminderFeedback.foreground)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .background(
+                    Capsule()
+                        .fill(reminderFeedback.background)
+                )
+            }
         }
+    }
+
+    private var quickReminderButton: some View {
+        Button {
+            Haptics.tap()
+            addTodaysRemainingMedsToReminders()
+        } label: {
+            ZStack {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Theme.Palette.card)
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(Theme.Palette.hairline.opacity(0.85), lineWidth: 1)
+
+                if isAddingReminders {
+                    ProgressView()
+                        .tint(Theme.Palette.primary)
+                } else {
+                    Image(systemName: "bell.badge.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(Theme.Palette.primary)
+                }
+            }
+            .frame(width: 52, height: 52)
+            .shadow(color: Theme.Shadow.ambient.opacity(0.4), radius: 12, y: 6)
+            .overlay(alignment: .bottomTrailing) {
+                if remainingDoseCount > 0 && !isAddingReminders {
+                    Text("\(remainingDoseCount)")
+                        .font(Theme.Font.body(10, weight: .bold))
+                        .foregroundStyle(Theme.Palette.onPrimary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 4)
+                        .background(Capsule().fill(Theme.Palette.primary))
+                        .offset(x: 4, y: 4)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Add today's remaining medications to Reminders")
     }
 
     private var dayDateLabel: String {
@@ -318,7 +379,7 @@ struct MedicationsView: View {
     // MARK: - Tab Row
 
     private var tabRow: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 6) {
             ForEach(MedsTab.allCases, id: \.self) { tab in
                 Button {
                     Haptics.select()
@@ -327,18 +388,23 @@ struct MedicationsView: View {
                     Text(tab.rawValue)
                         .font(Theme.Font.body(13, weight: selectedTab == tab ? .bold : .semibold))
                         .foregroundStyle(selectedTab == tab ? Theme.Palette.onPrimary : Theme.Palette.inkSoft)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 9)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                        .allowsTightening(true)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 11)
                         .background(
                             Capsule()
                                 .fill(selectedTab == tab ? Theme.Palette.sageDeep : Color.clear)
                         )
                 }
                 .buttonStyle(.plain)
+                .frame(maxWidth: .infinity)
             }
         }
         .padding(4)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .fill(Theme.Palette.paperSoft)
@@ -469,33 +535,60 @@ struct MedicationsView: View {
     @ViewBuilder
     private var interactionsContent: some View {
         if medications.count < 2 {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Nothing to check yet")
-                    .font(Theme.Font.display(22, weight: .bold))
-                    .foregroundStyle(Theme.Palette.ink)
-                Text("Interaction checking kicks in once you have at least 2 medications added.")
-                    .font(Theme.Font.body(15, weight: .medium))
-                    .foregroundStyle(Theme.Palette.inkSoft)
+            VStack(spacing: 16) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Nothing to check yet")
+                        .font(Theme.Font.display(22, weight: .bold))
+                        .foregroundStyle(Theme.Palette.ink)
+                    Text("Interaction checking kicks in once you have at least 2 medications added.")
+                        .font(Theme.Font.body(15, weight: .medium))
+                        .foregroundStyle(Theme.Palette.inkSoft)
+                }
+                .padding(22)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 24, style: .continuous).fill(Theme.Palette.card)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .strokeBorder(Theme.Palette.hairline, lineWidth: 1)
+                )
+
+                if let showcaseInteractionIssue {
+                    interactionIssueCard(showcaseInteractionIssue, showsAcceptButton: true)
+                }
             }
-            .padding(22)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 24, style: .continuous).fill(Theme.Palette.card)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .strokeBorder(Theme.Palette.hairline, lineWidth: 1)
-            )
         } else {
-            let conflicts   = interactions.filter { $0.severity == .timingConflict }
-            let noConflicts = interactions.filter { $0.severity == .noConflict }
+            let report = interactionReport
+            let shownIssues = interactionIssuesToShow
 
             VStack(spacing: 16) {
-                ForEach(conflicts) { interaction in
-                    timingConflictCard(interaction)
+                interactionOverviewCard(pairCount: report.pairAssessments.count, issueCount: shownIssues.count)
+
+                if let interactionActionMessage {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 12, weight: .bold))
+                        Text(interactionActionMessage)
+                            .lineLimit(2)
+                    }
+                    .font(Theme.Font.body(12, weight: .semibold))
+                    .foregroundStyle(Theme.Palette.sageDeep)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Capsule().fill(Theme.Palette.mint))
                 }
 
-                if !noConflicts.isEmpty {
+                if shownIssues.isEmpty {
+                    noIssueCard(report)
+                } else {
+                    ForEach(shownIssues) { issue in
+                        interactionIssueCard(issue, showsAcceptButton: report.issues.isEmpty)
+                    }
+                }
+
+                if !report.clearPairs.isEmpty {
                     VStack(spacing: 0) {
                         HStack {
                             Text("CHECKED · NO CONFLICTS")
@@ -511,9 +604,9 @@ struct MedicationsView: View {
                         Divider()
                             .padding(.horizontal, Theme.Space.md)
 
-                        ForEach(Array(noConflicts.enumerated()), id: \.element.id) { index, interaction in
-                            noConflictRow(interaction)
-                            if index < noConflicts.count - 1 {
+                        ForEach(Array(report.clearPairs.enumerated()), id: \.element.id) { index, assessment in
+                            noConflictRow(assessment)
+                            if index < report.clearPairs.count - 1 {
                                 Divider().padding(.leading, 54)
                             }
                         }
@@ -531,20 +624,82 @@ struct MedicationsView: View {
         }
     }
 
-    private func timingConflictCard(_ interaction: DrugInteraction) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            // Warning eyebrow
-            HStack(spacing: 7) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(Theme.Palette.coralDeep)
-                Text("TIMING CONFLICT")
-                    .font(Theme.Font.body(11, weight: .bold))
-                    .tracking(0.8)
-                    .foregroundStyle(Theme.Palette.coralDeep)
+    private func interactionOverviewCard(pairCount: Int, issueCount: Int) -> some View {
+        HStack(alignment: .top, spacing: Theme.Space.md) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(issueCount == 0 ? "Interaction check looks clean" : "Review these interaction alerts")
+                    .font(Theme.Font.body(18, weight: .semibold))
+                    .foregroundStyle(Theme.Palette.ink)
+                Text("\(pairCount) pair\(pairCount == 1 ? "" : "s") checked across your current medication list.")
+                    .font(Theme.Font.body(14, weight: .medium))
+                    .foregroundStyle(Theme.Palette.inkSoft)
             }
 
-            // Medication pair row
+            Spacer()
+
+            StatusChip(
+                text: issueCount == 0 ? "Clear" : "\(issueCount) alert\(issueCount == 1 ? "" : "s")",
+                kind: issueCount == 0 ? .done : .warn
+            )
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Theme.Palette.card)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .strokeBorder(Theme.Palette.hairline.opacity(0.8), lineWidth: 1)
+        )
+        .shadow(color: Theme.Shadow.ambient.opacity(0.35), radius: 16, y: 8)
+    }
+
+    private func noIssueCard(_ report: MedicationSafetyReport) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.shield.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.Palette.sageDeep)
+                Text("No actionable issues found")
+                    .font(Theme.Font.body(16, weight: .semibold))
+                    .foregroundStyle(Theme.Palette.ink)
+            }
+
+            Text("I did not find a medication pair that needs spacing changes, a major class warning, or a matched allergy flag in the current list.")
+                .font(Theme.Font.body(14, weight: .medium))
+                .foregroundStyle(Theme.Palette.inkSoft)
+
+            Text("This screen is a quick safety check, not a full medication review. New prescriptions and short-term meds can still change the picture.")
+                .font(Theme.Font.body(13, weight: .medium))
+                .foregroundStyle(Theme.Palette.inkMuted)
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Theme.Palette.primaryFixed.opacity(0.45))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .strokeBorder(Theme.Palette.primary.opacity(0.14), lineWidth: 1)
+        )
+    }
+
+    private func interactionIssueCard(_ issue: MedicationInteractionIssue, showsAcceptButton: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 7) {
+                Image(systemName: interactionIcon(for: issue))
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(interactionAccent(for: issue))
+                Text(interactionEyebrow(for: issue))
+                    .font(Theme.Font.body(11, weight: .bold))
+                    .tracking(0.8)
+                    .foregroundStyle(interactionAccent(for: issue))
+                Spacer()
+                StatusChip(text: issue.severity.label, kind: interactionStatusKind(for: issue))
+            }
+
             HStack(spacing: 10) {
                 medPairIcon()
                 Image(systemName: "plus")
@@ -553,25 +708,32 @@ struct MedicationsView: View {
                 medPairIcon()
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(interaction.med1Name)
+                    Text(issue.primary.displayName)
                         .font(Theme.Font.body(16, weight: .bold))
                         .foregroundStyle(Theme.Palette.ink)
-                    Text("+ \(interaction.med2Name)")
+                    Text("+ \(issue.secondary.displayName)")
                         .font(Theme.Font.body(15, weight: .semibold))
                         .foregroundStyle(Theme.Palette.inkSoft)
                 }
             }
 
-            // Description
-            Text(interaction.description)
+            Text(issue.summary)
                 .font(Theme.Font.body(14, weight: .medium))
                 .foregroundStyle(Theme.Palette.inkSoft)
                 .fixedSize(horizontal: false, vertical: true)
 
-            // Suggested schedule
-            if let gap = interaction.timingGapHours,
-               let t1 = interaction.med1SuggestedTime,
-               let t2 = interaction.med2SuggestedTime {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("WHAT TO DO")
+                    .font(Theme.Font.body(10, weight: .bold))
+                    .tracking(0.8)
+                    .foregroundStyle(Theme.Palette.inkMuted)
+                Text(issue.recommendation)
+                    .font(Theme.Font.body(14, weight: .medium))
+                    .foregroundStyle(Theme.Palette.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let adjustment = issue.scheduleAdjustment {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("SUGGESTED SCHEDULE")
                         .font(Theme.Font.body(10, weight: .bold))
@@ -580,10 +742,10 @@ struct MedicationsView: View {
 
                     HStack(alignment: .center) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(t1)
+                            Text(adjustment.anchorTime)
                                 .font(Theme.Font.body(16, weight: .bold))
                                 .foregroundStyle(Theme.Palette.ink)
-                            Text(interaction.med1Name)
+                            Text(adjustment.anchorMedicationName)
                                 .font(Theme.Font.body(12, weight: .medium))
                                 .foregroundStyle(Theme.Palette.inkSoft)
                                 .lineLimit(1)
@@ -594,7 +756,7 @@ struct MedicationsView: View {
                         HStack(spacing: 3) {
                             Image(systemName: "plus")
                                 .font(.system(size: 9, weight: .bold))
-                            Text("\(gap)h gap")
+                            Text("\(adjustment.minimumGapHours)h gap")
                                 .font(Theme.Font.body(12, weight: .bold))
                         }
                         .foregroundStyle(Theme.Palette.sageDeep)
@@ -605,10 +767,10 @@ struct MedicationsView: View {
                         Spacer()
 
                         VStack(alignment: .trailing, spacing: 2) {
-                            Text(t2)
+                            Text(adjustment.suggestedTime)
                                 .font(Theme.Font.body(16, weight: .bold))
                                 .foregroundStyle(Theme.Palette.ink)
-                            Text(interaction.med2Name)
+                            Text(adjustment.targetMedicationName)
                                 .font(Theme.Font.body(12, weight: .medium))
                                 .foregroundStyle(Theme.Palette.inkSoft)
                                 .lineLimit(1)
@@ -620,34 +782,58 @@ struct MedicationsView: View {
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
                         .fill(Theme.Palette.paperSoft)
                 )
+
             }
 
-            // Apply button
-            Button {
-                Haptics.tap()
-            } label: {
-                Text("Apply suggested schedule")
-                    .font(Theme.Font.body(15, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(Capsule().fill(Theme.Palette.ink))
+            if showsAcceptButton {
+                Button {
+                    acceptShowcaseInteraction(issue)
+                } label: {
+                    Text(issue.scheduleAdjustment == nil ? "Accept alert" : "Accept plan")
+                        .font(Theme.Font.body(15, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Capsule().fill(Theme.Palette.ink))
+                }
+                .buttonStyle(.plain)
+            } else if let adjustment = issue.scheduleAdjustment {
+                Button {
+                    applySuggestedSchedule(adjustment)
+                } label: {
+                    Text("Apply \(adjustment.suggestedTime) for \(adjustment.targetMedicationName)")
+                        .font(Theme.Font.body(15, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Capsule().fill(Theme.Palette.ink))
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
+
+            HStack(spacing: 8) {
+                PillTag(
+                    text: issue.source,
+                    fill: Theme.Palette.surfaceContainerLowest,
+                    border: Theme.Palette.outlineVariant,
+                    foreground: Theme.Palette.inkMuted,
+                    icon: "checklist"
+                )
+            }
         }
         .padding(18)
         .background(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(Theme.Palette.peachTint.opacity(0.35))
+                .fill(interactionCardFill(for: issue))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .strokeBorder(Theme.Palette.coral.opacity(0.5), lineWidth: 1.5)
+                .strokeBorder(interactionAccent(for: issue).opacity(0.35), lineWidth: 1.5)
         )
-        .shadow(color: Theme.Palette.coralDeep.opacity(0.08), radius: 18, y: 10)
+        .shadow(color: interactionAccent(for: issue).opacity(0.08), radius: 18, y: 10)
     }
 
-    private func noConflictRow(_ interaction: DrugInteraction) -> some View {
+    private func noConflictRow(_ assessment: MedicationPairAssessment) -> some View {
         HStack(spacing: 12) {
             ZStack {
                 Circle()
@@ -659,7 +845,7 @@ struct MedicationsView: View {
             }
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("\(interaction.med1Name) + \(interaction.med2Name)")
+                Text("\(assessment.primary.displayName) + \(assessment.secondary.displayName)")
                     .font(Theme.Font.body(14, weight: .semibold))
                     .foregroundStyle(Theme.Palette.ink)
                 Text("No known interaction")
@@ -671,6 +857,48 @@ struct MedicationsView: View {
         }
         .padding(.horizontal, Theme.Space.md)
         .padding(.vertical, 12)
+    }
+
+    private func interactionEyebrow(for issue: MedicationInteractionIssue) -> String {
+        switch issue.kind {
+        case .timing: "TIMING ISSUE"
+        case .allergy: "ALLERGY ALERT"
+        case .duplicateTherapy: "CLASS OVERLAP"
+        case .monitoring: "MEDICATION REVIEW"
+        }
+    }
+
+    private func interactionIcon(for issue: MedicationInteractionIssue) -> String {
+        switch issue.kind {
+        case .timing: "clock.badge.exclamationmark.fill"
+        case .allergy: "exclamationmark.triangle.fill"
+        case .duplicateTherapy: "pills.circle.fill"
+        case .monitoring: "stethoscope"
+        }
+    }
+
+    private func interactionStatusKind(for issue: MedicationInteractionIssue) -> StatusChip.Kind {
+        switch issue.severity {
+        case .low: .ask
+        case .moderate: .warn
+        case .high: .flag
+        }
+    }
+
+    private func interactionAccent(for issue: MedicationInteractionIssue) -> Color {
+        switch issue.severity {
+        case .low: Theme.Palette.primary
+        case .moderate: Theme.Palette.coralDeep
+        case .high: Theme.Palette.error
+        }
+    }
+
+    private func interactionCardFill(for issue: MedicationInteractionIssue) -> Color {
+        switch issue.severity {
+        case .low: Theme.Palette.primaryFixed.opacity(0.35)
+        case .moderate: Theme.Palette.peachTint.opacity(0.35)
+        case .high: Theme.Palette.errorContainer.opacity(0.65)
+        }
     }
 
     // MARK: - Streak Tab
@@ -1204,6 +1432,117 @@ struct MedicationsView: View {
         try? context.save()
     }
 
+    private func applySuggestedSchedule(_ adjustment: MedicationScheduleAdjustment) {
+        guard let medication = medications.first(where: { String(describing: $0.persistentModelID) == adjustment.targetMedicationID }) else {
+            interactionActionMessage = "I couldn't find that medication to update its schedule."
+            Haptics.error()
+            return
+        }
+
+        var updatedTimes = medication.preferredTimes
+        if updatedTimes.isEmpty {
+            updatedTimes = [adjustment.suggestedTime]
+        } else {
+            updatedTimes[0] = adjustment.suggestedTime
+        }
+        medication.updatePreferredTimes(updatedTimes)
+
+        if let newTime = Self.parseTime(adjustment.suggestedTime) {
+            let calendar = Calendar.current
+            for log in doseLogs where log.medication?.persistentModelID == medication.persistentModelID {
+                guard calendar.isDateInToday(log.scheduledFor), !log.isTaken else { continue }
+                log.scheduledFor = newTime
+            }
+        }
+
+        try? context.save()
+        interactionActionMessage = "Moved \(medication.name) to \(adjustment.suggestedTime)."
+        Haptics.success()
+    }
+
+    private func acceptShowcaseInteraction(_ issue: MedicationInteractionIssue) {
+        if let adjustment = issue.scheduleAdjustment {
+            applySuggestedSchedule(adjustment)
+            return
+        }
+
+        interactionActionMessage = "Okay — I'll keep this interaction on your radar."
+        Haptics.success()
+    }
+
+    private func addTodaysRemainingMedsToReminders() {
+        guard !isAddingReminders else { return }
+
+        let drafts = reminderDrafts
+        guard !drafts.isEmpty else {
+            reminderFeedback = ReminderFeedback(
+                icon: "checkmark.circle.fill",
+                message: "Everything for today is already taken.",
+                foreground: Theme.Palette.sageDeep,
+                background: Theme.Palette.mint
+            )
+            Haptics.select()
+            return
+        }
+
+        isAddingReminders = true
+        reminderFeedback = nil
+
+        Task { @MainActor in
+            do {
+                let result = try await AppleRemindersStore.shared.addMedicationReminders(for: drafts)
+                isAddingReminders = false
+                reminderFeedback = feedback(for: result)
+                if result.addedCount > 0 { Haptics.success() } else { Haptics.select() }
+            } catch {
+                isAddingReminders = false
+                reminderAlert = ReminderAlert(
+                    title: "Couldn't Add Reminders",
+                    message: (error as? LocalizedError)?.errorDescription ?? "Something went wrong while adding today's medications to Apple Reminders."
+                )
+                Haptics.error()
+            }
+        }
+    }
+
+    private func feedback(for result: ReminderImportResult) -> ReminderFeedback {
+        if result.addedCount > 0 && result.skippedCount > 0 {
+            return ReminderFeedback(
+                icon: "checkmark.circle.fill",
+                message: "Added \(result.addedCount) reminder\(result.addedCount == 1 ? "" : "s") · \(result.skippedCount) already there",
+                foreground: Theme.Palette.sageDeep,
+                background: Theme.Palette.mint
+            )
+        }
+
+        if result.addedCount > 0 {
+            return ReminderFeedback(
+                icon: "checkmark.circle.fill",
+                message: "Added \(result.addedCount) reminder\(result.addedCount == 1 ? "" : "s") to Apple Reminders",
+                foreground: Theme.Palette.sageDeep,
+                background: Theme.Palette.mint
+            )
+        }
+
+        return ReminderFeedback(
+            icon: "list.bullet.clipboard",
+            message: "Today's remaining meds are already in Reminders.",
+            foreground: Theme.Palette.primary,
+            background: Theme.Palette.primaryFixed
+        )
+    }
+
+    private func formattedReminderTime(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "h:mm a"
+        return formatter.string(from: date)
+    }
+
+    private func shiftedTimeString(from rawTime: String, byAddingHours hours: Int) -> String? {
+        guard let base = Self.parseTime(rawTime) else { return nil }
+        return formattedReminderTime(for: base.addingTimeInterval(Double(hours) * 3600))
+    }
+
     // MARK: - Helpers
 
     nonisolated private static func parseTime(_ string: String) -> Date? {
@@ -1215,6 +1554,19 @@ struct MedicationsView: View {
         let components = calendar.dateComponents([.hour, .minute], from: date)
         return calendar.date(bySettingHour: components.hour ?? 0, minute: components.minute ?? 0, second: 0, of: .now)
     }
+}
+
+private struct ReminderFeedback {
+    let icon: String
+    let message: String
+    let foreground: Color
+    let background: Color
+}
+
+private struct ReminderAlert: Identifiable {
+    let id = UUID()
+    let title: String
+    let message: String
 }
 
 #Preview {

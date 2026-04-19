@@ -208,17 +208,19 @@ struct ProfileView: View {
 
     private func headerStat(title: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(Theme.Font.body(11, weight: .semibold))
+            Text(title.uppercased())
+                .font(Theme.Font.body(10, weight: .semibold))
                 .tracking(0.6)
                 .foregroundStyle(Theme.Palette.inkMuted)
-                .textCase(.uppercase)
+                .lineLimit(1)
+                .minimumScaleFactor(0.68)
+                .allowsTightening(true)
             Text(value)
                 .font(Theme.Font.body(15, weight: .semibold))
                 .foregroundStyle(Theme.Palette.ink)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 10)
         .padding(.vertical, 11)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)

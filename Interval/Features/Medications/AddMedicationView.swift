@@ -4,6 +4,8 @@ import SwiftData
 struct AddMedicationView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
+    @Query(sort: [SortDescriptor(\Medication.createdAt)]) private var medications: [Medication]
+    @Query private var profiles: [UserProfile]
 
     enum Mode: String, CaseIterable { case manual = "Manual", scan = "Scan Rx", history = "From history" }
 
@@ -21,6 +23,21 @@ struct AddMedicationView: View {
     @State private var reminders = true
 
     @State private var showInteraction = false
+
+    private var draftDoseText: String {
+        let trimmed = doseAmount.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? doseUnit : "\(trimmed) \(doseUnit)"
+    }
+
+    private var interactionPreview: MedicationAdditionReport {
+        MedicationSafetyEngine.analyzeAddition(
+            candidateName: name,
+            candidateBrand: brand.isEmpty ? nil : brand,
+            candidateDoseText: draftDoseText,
+            currentMedications: medications,
+            profile: profiles.first
+        )
+    }
 
     var body: some View {
         ScrollView {
@@ -163,15 +180,20 @@ struct AddMedicationView: View {
                 // AI double-check blurb
                 HStack(alignment: .top, spacing: 10) {
                     AvatarCircle(initials: "i", size: 28)
-                    Text("I checked this against your current meds — looking good. Double-checking one thing…")
-                        .font(Theme.Font.body(13))
-                        .foregroundStyle(Theme.Palette.inkSoft)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(interactionPreviewHeadline)
+                            .font(Theme.Font.body(13, weight: .semibold))
+                            .foregroundStyle(Theme.Palette.ink)
+                        Text(interactionPreviewDetail)
+                            .font(Theme.Font.body(13))
+                            .foregroundStyle(Theme.Palette.inkSoft)
+                    }
                 }
                 .padding(Theme.Space.md)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .softCard(fill: Theme.Palette.paperSoft)
 
-                PrimaryButton(title: "Check interactions") {
+                PrimaryButton(title: interactionPreview.isClear ? "Review safety check" : "Review interactions") {
                     showInteraction = true
                 }
             }
@@ -181,11 +203,37 @@ struct AddMedicationView: View {
         .background(Theme.Palette.paper)
         .sheet(isPresented: $showInteraction) {
             NavigationStack {
-                InteractionCheckView(newMedName: name, newDose: "\(doseAmount)\(doseUnit)") {
+                InteractionCheckView(
+                    newMedName: name,
+                    newBrand: brand.isEmpty ? nil : brand,
+                    newDose: draftDoseText,
+                    withFood: withFood,
+                    withWater: withWater
+                ) {
                     save()
                 }
             }
         }
+    }
+
+    private var interactionPreviewHeadline: String {
+        if let severity = interactionPreview.highestSeverity {
+            switch severity {
+            case .high: return "I found something that needs a closer look."
+            case .moderate: return "I found a medication detail worth reviewing."
+            case .low: return "I found a small thing to double-check."
+            }
+        }
+
+        return "I checked this against your current meds and allergies."
+    }
+
+    private var interactionPreviewDetail: String {
+        if interactionPreview.isClear {
+            return "No direct pair warning or allergy match showed up in your current profile."
+        }
+
+        return "\(interactionPreview.issueCount) item\(interactionPreview.issueCount == 1 ? "" : "s") popped up. I’ll show the specific pair and what to do next."
     }
 
     private func fieldCard<Content: View>(label: String, prominent: Bool = false, @ViewBuilder content: @escaping () -> Content) -> some View {

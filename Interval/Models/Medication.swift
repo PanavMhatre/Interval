@@ -82,6 +82,10 @@ final class Medication {
         return (try? JSONDecoder().decode([String].self, from: data)) ?? []
     }
 
+    func updatePreferredTimes(_ times: [String]) {
+        preferredTimesJSON = (try? String(data: JSONEncoder().encode(times), encoding: .utf8)) ?? "[]"
+    }
+
     var doseText: String {
         let amount = doseAmount.truncatingRemainder(dividingBy: 1) == 0
             ? String(Int(doseAmount))

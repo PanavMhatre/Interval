@@ -13,7 +13,6 @@ struct HomeView: View {
     @Query(sort: [SortDescriptor(\LabResult.capturedAt, order: .reverse)]) private var labResults: [LabResult]
 
     @State private var tappedInsightSource: ChatSource?
-
     @State private var selectedTrendTarget: TrendSheetTarget?
 
     private var profile: UserProfile? { profiles.first }
@@ -39,9 +38,6 @@ struct HomeView: View {
             MetricTrendSheet(metric: target.metric, labs: labs)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
-        }
-        .sheet(item: $tappedInsightSource) { source in
-            insightSourceSheet(source)
         }
     }
 
@@ -176,22 +172,19 @@ struct HomeView: View {
         Group {
             if let first = insights.first {
                 let linkedMetric = linkedMetric(for: first)
-                VStack(alignment: .leading, spacing: 10) {
-                    InsightCard(
-                        eyebrow: first.kind.eyebrow,
-                        title: first.title,
-                        detail: first.detail,
-                        badge: "New",
-                        onPrimary: linkedMetric == nil ? nil : {
-                            if let linkedMetric {
-                                Haptics.tap()
-                                selectedTrendTarget = TrendSheetTarget(metric: linkedMetric)
-                            }
-                        },
-                        primaryLabel: "See trend"
-                    )
-                    insightSourceChips(for: first)
-                }
+                InsightCard(
+                    eyebrow: first.kind.eyebrow,
+                    title: first.title,
+                    detail: first.detail,
+                    badge: "New",
+                    onPrimary: linkedMetric == nil ? nil : {
+                        if let linkedMetric {
+                            Haptics.tap()
+                            selectedTrendTarget = TrendSheetTarget(metric: linkedMetric)
+                        }
+                    },
+                    primaryLabel: "See trend"
+                )
             }
         }
     }
@@ -401,59 +394,6 @@ struct HomeView: View {
                     .shadow(color: Theme.Shadow.ambient.opacity(0.28), radius: 8, y: 4)
                 }
             }
-
-            Button {
-                Haptics.tap()
-                Task {
-                    if appleHealth.isConnected {
-                        await appleHealth.refreshIfNeeded(force: true)
-                    } else {
-                        await appleHealth.requestAccess()
-                    }
-                }
-            } label: {
-                HStack(spacing: 12) {
-                    HStack(spacing: 8) {
-                        ZStack {
-                            Circle()
-                                .fill(Theme.Palette.secondaryFixed)
-                                .frame(width: 24, height: 24)
-                            Image(systemName: "heart.fill")
-                                .foregroundStyle(Theme.Palette.coralDeep)
-                                .font(.system(size: 10, weight: .semibold))
-                        }
-                        Text("From Health")
-                            .eyebrowStyle()
-                    }
-
-                    Spacer(minLength: 8)
-
-                    Text(healthSummaryText)
-                        .font(Theme.Font.body(13, weight: .medium))
-                        .foregroundStyle(Theme.Palette.inkSoft)
-                        .multilineTextAlignment(.trailing)
-
-                    if appleHealth.isLoading {
-                        ProgressView()
-                            .tint(Theme.Palette.primary)
-                    } else {
-                        StatusChip(text: healthStatusText, kind: healthStatusKind)
-                    }
-                }
-                .padding(.horizontal, Theme.Space.md)
-                .padding(.vertical, 14)
-                .background(
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .fill(Theme.Palette.surfaceContainerLow)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .strokeBorder(Theme.Palette.outlineVariant.opacity(0.9), lineWidth: 1)
-                )
-                .shadow(color: Theme.Shadow.ambient.opacity(0.22), radius: 8, y: 4)
-            }
-            .buttonStyle(.plain)
-            .disabled(!appleHealth.isAvailable)
         }
     }
 
