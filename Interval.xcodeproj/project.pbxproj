@@ -10,9 +10,22 @@
 		EE25922A2F94109F00D3EC68 /* Interval.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Interval.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		EEBC98552F947D87005DC04F /* Exceptions for "Interval" folder in "Interval" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = EE2592292F94109F00D3EC68 /* Interval */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		EE25922C2F94109F00D3EC68 /* Interval */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				EEBC98552F947D87005DC04F /* Exceptions for "Interval" folder in "Interval" target */,
+			);
 			path = Interval;
 			sourceTree = "<group>";
 		};
@@ -260,14 +273,17 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = F4Q68YM222;
+				DEVELOPMENT_TEAM = 7K6CXFJBDB;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Interval/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Interval;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Interval uses the camera to scan lab results and prescriptions on-device.";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Interval reads your Apple Health profile — age, biological sex, blood type, height — plus live steps, sleep, hydration, and heart rate, all on-device.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Requires health data for accurate guidance.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Interval reads lab images you pick to add them to your health profile.";
-				INFOPLIST_KEY_NSRemindersUsageDescription = "Interval adds today's medication schedule to Apple Reminders when you ask it to.";
 				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "Interval adds today's medication schedule to Apple Reminders when you ask it to.";
+				INFOPLIST_KEY_NSRemindersUsageDescription = "Interval adds today's medication schedule to Apple Reminders when you ask it to.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -278,8 +294,8 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.devin.pmhatre.interval;
+				MARKETING_VERSION = 1.1;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.sjalkote.devin.interval-hookem";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -301,14 +317,17 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = F4Q68YM222;
+				DEVELOPMENT_TEAM = 7K6CXFJBDB;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Interval/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Interval;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Interval uses the camera to scan lab results and prescriptions on-device.";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Interval reads your Apple Health profile — age, biological sex, blood type, height — plus live steps, sleep, hydration, and heart rate, all on-device.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Requires health data for accurate guidance.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Interval reads lab images you pick to add them to your health profile.";
-				INFOPLIST_KEY_NSRemindersUsageDescription = "Interval adds today's medication schedule to Apple Reminders when you ask it to.";
 				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "Interval adds today's medication schedule to Apple Reminders when you ask it to.";
+				INFOPLIST_KEY_NSRemindersUsageDescription = "Interval adds today's medication schedule to Apple Reminders when you ask it to.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -319,8 +338,8 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.devin.pmhatre.interval;
+				MARKETING_VERSION = 1.1;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.sjalkote.devin.interval-hookem";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;

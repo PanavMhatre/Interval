@@ -402,7 +402,16 @@ struct HomeView: View {
     }
 
     private var sleepValue: String {
-        appleHealth.isConnected ? appleHealth.snapshot.sleepText : "7h 12m"
+        switch appleHealth.syncState {
+        case .connected, .waitingForData:
+            return appleHealth.snapshot.sleepText
+        case .syncing:
+            return appleHealth.snapshot.sleepHours == nil ? "Syncing" : appleHealth.snapshot.sleepText
+        case .disconnected:
+            return "Connect"
+        case .unavailable:
+            return "No data"
+        }
     }
 
     private var waterValue: String {
@@ -414,7 +423,7 @@ struct HomeView: View {
     }
 
     private var sleepProgress: Double {
-        appleHealth.isConnected ? appleHealth.snapshot.sleepProgress : 0.9
+        appleHealth.snapshot.sleepProgress
     }
 
     private var waterProgress: Double {

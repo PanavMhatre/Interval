@@ -25,7 +25,13 @@ enum TextRecognizer {
                     continuation.resume(throwing: error)
                     return
                 }
-                let observations = (req.results as? [VNRecognizedTextObservation]) ?? []
+                let observations = ((req.results as? [VNRecognizedTextObservation]) ?? []).sorted {
+                    let yDistance = abs($0.boundingBox.midY - $1.boundingBox.midY)
+                    if yDistance > 0.03 {
+                        return $0.boundingBox.midY > $1.boundingBox.midY
+                    }
+                    return $0.boundingBox.minX < $1.boundingBox.minX
+                }
                 let lines = observations
                     .compactMap { $0.topCandidates(1).first?.string }
                     .filter { !$0.isEmpty }

@@ -3,6 +3,19 @@ import SwiftData
 import SwiftUI
 import UIKit
 
+#if canImport(FoundationModels)
+import FoundationModels
+
+@Generable
+private struct MedicationLabelExtraction {
+    @Guide(description: "Brand name shown prominently on the package, such as Tylenol or Claritin. Empty string if unknown.")
+    var brandName: String
+
+    @Guide(description: "Generic medication name or active ingredient, such as Acetaminophen or Loratadine. Empty string if unknown.")
+    var medicationName: String
+}
+#endif
+
 struct AddMedicationView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
@@ -37,7 +50,7 @@ struct AddMedicationView: View {
         Calendar.current.date(bySettingHour: 21, minute: 0, second: 0, of: .now) ?? .now
     }()
 
-    private struct ScannedMedicationDraft {
+    private struct ScannedMedicationDraft: Sendable {
         var name: String?
         var brand: String?
         var doseAmount: String?
@@ -50,6 +63,169 @@ struct AddMedicationView: View {
         var withWater: Bool?
         var message: String
     }
+
+    private struct MedicationLabelAlias: Sendable {
+        let brand: String
+        let brandTokens: [String]
+        let genericName: String
+        let genericTokens: [String]
+        let allowGenericFallbackForCompoundProducts: Bool
+    }
+
+    private static let medicationLabelAliases: [MedicationLabelAlias] = [
+        MedicationLabelAlias(
+            brand: "Tylenol",
+            brandTokens: ["tylenol"],
+            genericName: "Acetaminophen",
+            genericTokens: ["acetaminophen"],
+            allowGenericFallbackForCompoundProducts: false
+        ),
+        MedicationLabelAlias(
+            brand: "Claritin",
+            brandTokens: ["claritin"],
+            genericName: "Loratadine",
+            genericTokens: ["loratadine"],
+            allowGenericFallbackForCompoundProducts: false
+        ),
+        MedicationLabelAlias(
+            brand: "Advil",
+            brandTokens: ["advil"],
+            genericName: "Ibuprofen",
+            genericTokens: ["ibuprofen"],
+            allowGenericFallbackForCompoundProducts: false
+        ),
+        MedicationLabelAlias(
+            brand: "Motrin",
+            brandTokens: ["motrin"],
+            genericName: "Ibuprofen",
+            genericTokens: ["ibuprofen"],
+            allowGenericFallbackForCompoundProducts: false
+        ),
+        MedicationLabelAlias(
+            brand: "Aleve",
+            brandTokens: ["aleve"],
+            genericName: "Naproxen sodium",
+            genericTokens: ["naproxen sodium", "naproxen"],
+            allowGenericFallbackForCompoundProducts: false
+        ),
+        MedicationLabelAlias(
+            brand: "Zyrtec",
+            brandTokens: ["zyrtec"],
+            genericName: "Cetirizine",
+            genericTokens: ["cetirizine"],
+            allowGenericFallbackForCompoundProducts: false
+        ),
+        MedicationLabelAlias(
+            brand: "Benadryl",
+            brandTokens: ["benadryl"],
+            genericName: "Diphenhydramine",
+            genericTokens: ["diphenhydramine"],
+            allowGenericFallbackForCompoundProducts: false
+        ),
+        MedicationLabelAlias(
+            brand: "Mucinex",
+            brandTokens: ["mucinex"],
+            genericName: "Guaifenesin",
+            genericTokens: ["guaifenesin"],
+            allowGenericFallbackForCompoundProducts: false
+        ),
+        MedicationLabelAlias(
+            brand: "Pepcid",
+            brandTokens: ["pepcid"],
+            genericName: "Famotidine",
+            genericTokens: ["famotidine"],
+            allowGenericFallbackForCompoundProducts: false
+        ),
+        MedicationLabelAlias(
+            brand: "Prilosec",
+            brandTokens: ["prilosec"],
+            genericName: "Omeprazole",
+            genericTokens: ["omeprazole"],
+            allowGenericFallbackForCompoundProducts: false
+        ),
+        MedicationLabelAlias(
+            brand: "Imodium",
+            brandTokens: ["imodium"],
+            genericName: "Loperamide",
+            genericTokens: ["loperamide"],
+            allowGenericFallbackForCompoundProducts: false
+        ),
+        MedicationLabelAlias(
+            brand: "Allegra",
+            brandTokens: ["allegra"],
+            genericName: "Fexofenadine",
+            genericTokens: ["fexofenadine"],
+            allowGenericFallbackForCompoundProducts: false
+        ),
+        MedicationLabelAlias(
+            brand: "Bayer",
+            brandTokens: ["bayer"],
+            genericName: "Aspirin",
+            genericTokens: ["aspirin"],
+            allowGenericFallbackForCompoundProducts: false
+        )
+    ]
+
+    private static let blockedMedicationNamePrefixes = [
+        "drug facts",
+        "active ingredient",
+        "active ingredients",
+        "inactive ingredient",
+        "inactive ingredients",
+        "warnings",
+        "warning",
+        "directions",
+        "uses",
+        "questions",
+        "other information",
+        "children",
+        "adults",
+        "take",
+        "do not",
+        "keep out",
+        "store",
+        "compare to"
+    ]
+
+    private static let blockedMedicationNameFragments = [
+        "24hr",
+        "12hr",
+        "8hr",
+        "allergyrelief",
+        "painreliever",
+        "feverreducer",
+        "nondrowsy",
+        "extrastrength",
+        "maximumstrength",
+        "drugfacts",
+        "daytime",
+        "nighttime",
+        "multisymptom",
+        "coldflu",
+        "sleepaid",
+        "indooroutdoorallergies",
+        "relief",
+        "antihistamine"
+    ]
+
+    private static let compoundProductMarkers = [
+        "claritin-d",
+        "claritin d",
+        "children's",
+        " pm ",
+        " p.m.",
+        " daytime",
+        " nighttime",
+        " cold",
+        " flu",
+        " cough",
+        " sinus",
+        " congestion",
+        " severe",
+        " multisymptom",
+        " multi symptom",
+        " multi-symptom"
+    ]
 
     private var draftDoseText: String {
         let trimmed = doseAmount.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -569,8 +745,21 @@ struct AddMedicationView: View {
         Task {
             do {
                 let recognizedText = try await TextRecognizer.recognize(images)
+                let cleanedText = recognizedText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                guard !cleanedText.isEmpty else {
+                    await MainActor.run {
+                        isScanning = false
+                        scanStatusMessage = "I couldn't find medication text in that scan. Try again with the label centered."
+                        Haptics.error()
+                    }
+                    return
+                }
+
+                let draft = await parseScannedMedication(from: cleanedText)
+
                 await MainActor.run {
-                    applyScannedMedicationText(recognizedText)
+                    applyScannedMedicationDraft(draft)
                 }
             } catch {
                 await MainActor.run {
@@ -582,17 +771,7 @@ struct AddMedicationView: View {
         }
     }
 
-    private func applyScannedMedicationText(_ text: String) {
-        let cleanedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleanedText.isEmpty else {
-            isScanning = false
-            scanStatusMessage = "I couldn't find medication text in that scan. Try again with the label centered."
-            Haptics.error()
-            return
-        }
-
-        let draft = parseScannedMedication(from: cleanedText)
-
+    private func applyScannedMedicationDraft(_ draft: ScannedMedicationDraft) {
         if let scannedName = draft.name { name = scannedName }
         if let scannedBrand = draft.brand { brand = scannedBrand }
         if let scannedDoseAmount = draft.doseAmount { doseAmount = scannedDoseAmount }
@@ -611,7 +790,21 @@ struct AddMedicationView: View {
         Haptics.success()
     }
 
-    private func parseScannedMedication(from text: String) -> ScannedMedicationDraft {
+    private func parseScannedMedication(from text: String) async -> ScannedMedicationDraft {
+        let heuristicDraft = heuristicMedicationDraft(from: text)
+
+        guard shouldUseFoundationModelAssistance(for: heuristicDraft) else {
+            return heuristicDraft
+        }
+
+#if canImport(FoundationModels)
+        return await foundationModelMedicationDraft(from: text, fallback: heuristicDraft) ?? heuristicDraft
+#else
+        return heuristicDraft
+#endif
+    }
+
+    private func heuristicMedicationDraft(from text: String) -> ScannedMedicationDraft {
         let normalizedText = text.lowercased()
 
         if looksLikeNyQuil(in: normalizedText) {
@@ -635,7 +828,13 @@ struct AddMedicationView: View {
             .map(cleanScanLine)
             .filter { !$0.isEmpty }
 
-        let nameCandidate = medicationNameCandidate(from: lines)
+        let brandCandidate = brandCandidate(from: lines)
+        let genericCandidate = activeIngredientCandidate(from: lines, preferredBrand: brandCandidate)
+            ?? knownGenericNameCandidate(from: lines, preferredBrand: brandCandidate)
+            ?? genericNameFallback(for: brandCandidate, in: normalizedText)
+        let nameCandidate = genericCandidate
+            ?? medicationNameCandidate(from: lines, excludingBrand: brandCandidate)
+            ?? brandCandidate
         let doseMatch = firstMatch(
             for: "(\\d+(?:\\.\\d+)?)\\s?(mg|mcg|g|ml|units?)\\b",
             in: text
@@ -666,7 +865,7 @@ struct AddMedicationView: View {
 
         let draft = ScannedMedicationDraft(
             name: nameCandidate,
-            brand: nil,
+            brand: brandCandidate,
             doseAmount: doseMatch[safe: 1],
             doseUnit: doseMatch[safe: 2].map(normalizedDoseUnit),
             form: detectedForm(from: normalizedText),
@@ -681,6 +880,81 @@ struct AddMedicationView: View {
         return draft
     }
 
+    private func shouldUseFoundationModelAssistance(for draft: ScannedMedicationDraft) -> Bool {
+        guard let name = draft.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else {
+            return true
+        }
+
+        if nameLooksLikeMarketingCopy(name) {
+            return true
+        }
+
+        guard let brand = draft.brand?.trimmingCharacters(in: .whitespacesAndNewlines), !brand.isEmpty else {
+            return true
+        }
+
+        return normalizedScanToken(name) == normalizedScanToken(brand)
+    }
+
+#if canImport(FoundationModels)
+    private func foundationModelMedicationDraft(
+        from text: String,
+        fallback: ScannedMedicationDraft
+    ) async -> ScannedMedicationDraft? {
+        let model = SystemLanguageModel.default
+        switch model.availability {
+        case .available:
+            break
+        case .unavailable:
+            return nil
+        }
+
+        let session = LanguageModelSession(instructions: """
+            You extract medication label details from OCR text.
+            The OCR may be noisy and slightly out of order.
+            Identify the prominent brand name when it is clear, such as Tylenol or Claritin.
+            Identify the generic medication or active ingredient when it is clear, such as Acetaminophen or Loratadine.
+            Prefer the active ingredient for medicationName.
+            Never use symptom text, section headers, strengths, dosage forms, or marketing copy as medicationName.
+            Return empty strings instead of guessing.
+            """)
+
+        do {
+            let response = try await session.respond(
+                to: "OCR TEXT:\n\(text)",
+                generating: MedicationLabelExtraction.self
+            )
+
+            let resolvedBrand = resolvedBrandName(from: response.content.brandName) ?? fallback.brand
+            let resolvedName = resolvedMedicationName(
+                from: response.content.medicationName,
+                fallback: fallback.name,
+                brand: resolvedBrand
+            )
+
+            guard resolvedBrand != fallback.brand || resolvedName != fallback.name else {
+                return nil
+            }
+
+            return ScannedMedicationDraft(
+                name: resolvedName,
+                brand: resolvedBrand,
+                doseAmount: fallback.doseAmount,
+                doseUnit: fallback.doseUnit,
+                form: fallback.form,
+                schedule: fallback.schedule,
+                intervalHours: fallback.intervalHours,
+                maxPerDay: fallback.maxPerDay,
+                withFood: fallback.withFood,
+                withWater: fallback.withWater,
+                message: fallback.message
+            )
+        } catch {
+            return nil
+        }
+    }
+#endif
+
     private func looksLikeNyQuil(in text: String) -> Bool {
         if text.contains("nyquil") || text.contains("ny quil") {
             return true
@@ -691,47 +965,269 @@ struct AddMedicationView: View {
             && (text.contains("cold") || text.contains("flu") || text.contains("cough"))
     }
 
-    private func medicationNameCandidate(from lines: [String]) -> String? {
-        let blockedPrefixes = [
-            "drug facts",
-            "active ingredient",
-            "inactive ingredient",
-            "warnings",
-            "warning",
-            "directions",
-            "uses",
-            "questions",
-            "other information",
-            "children",
-            "adults",
-            "take",
-            "do not",
-            "keep out",
-            "store",
-            "compare to"
-        ]
+    private func brandCandidate(from lines: [String]) -> String? {
+        var bestMatch: (brand: String, score: Int)?
 
-        for line in lines.prefix(8) {
+        for (index, line) in lines.prefix(12).enumerated() {
             let lowercasedLine = line.lowercased()
-            if blockedPrefixes.contains(where: { lowercasedLine.hasPrefix($0) }) {
-                continue
-            }
-            if lowercasedLine.contains("mg")
-                || lowercasedLine.contains("ml")
-                || lowercasedLine.contains("mcg")
-                || lowercasedLine.contains("drug facts") {
+            if lowercasedLine.contains("compare to") {
                 continue
             }
 
-            let letterCount = line.filter(\.isLetter).count
-            let wordCount = line.split(separator: " ").count
+            let normalizedLine = normalizedScanToken(line)
 
-            if letterCount >= 3, wordCount <= 6, line.count <= 40 {
-                return prettifiedMedicationName(line)
+            for alias in Self.medicationLabelAliases {
+                for token in alias.brandTokens {
+                    let normalizedToken = normalizedScanToken(token)
+                    guard !normalizedToken.isEmpty else { continue }
+
+                    let score: Int
+                    if normalizedLine == normalizedToken {
+                        score = 170 - (index * 10)
+                    } else if normalizedLine.hasPrefix(normalizedToken) {
+                        score = 150 - (index * 10)
+                    } else if normalizedLine.contains(normalizedToken) {
+                        score = 130 - (index * 10)
+                    } else {
+                        score = 0
+                    }
+
+                    guard score > 0 else { continue }
+
+                    if score > (bestMatch?.score ?? 0) {
+                        bestMatch = (alias.brand, score)
+                    }
+                }
+            }
+        }
+
+        return bestMatch?.brand
+    }
+
+    private func activeIngredientCandidate(from lines: [String], preferredBrand: String?) -> String? {
+        for (index, line) in lines.prefix(16).enumerated() {
+            let lowercasedLine = line.lowercased()
+            guard lowercasedLine.contains("active ingredient") || lowercasedLine.contains("drug facts") else {
+                continue
+            }
+
+            let endIndex = min(index + 3, lines.count)
+            for nearbyLine in lines[index..<endIndex] {
+                if let matchedGeneric = knownGenericName(in: nearbyLine, preferredBrand: preferredBrand) {
+                    return matchedGeneric
+                }
+
+                if let extracted = extractedMedicationNameFromStrengthLine(nearbyLine),
+                   isAcceptableMedicationName(extracted, excludingBrand: preferredBrand) {
+                    return extracted
+                }
+
+                let candidate = sanitizedMedicationCandidate(nearbyLine)
+                if isAcceptableMedicationName(candidate, excludingBrand: preferredBrand) {
+                    return candidate
+                }
             }
         }
 
         return nil
+    }
+
+    private func knownGenericNameCandidate(from lines: [String], preferredBrand: String?) -> String? {
+        var bestMatch: (name: String, score: Int)?
+
+        for (index, line) in lines.prefix(16).enumerated() {
+            guard let matchedGeneric = knownGenericName(in: line, preferredBrand: preferredBrand) else {
+                continue
+            }
+
+            var score = 120 - (index * 6)
+            if line.lowercased().contains("active ingredient") {
+                score += 30
+            }
+            if containsDose(in: line) {
+                score += 10
+            }
+
+            if score > (bestMatch?.score ?? 0) {
+                bestMatch = (matchedGeneric, score)
+            }
+        }
+
+        return bestMatch?.name
+    }
+
+    private func genericNameFallback(for brand: String?, in text: String) -> String? {
+        guard
+            let brand,
+            let alias = Self.medicationLabelAliases.first(where: { $0.brand == brand })
+        else {
+            return nil
+        }
+
+        if !alias.allowGenericFallbackForCompoundProducts,
+           Self.compoundProductMarkers.contains(where: { text.contains($0) }) {
+            return nil
+        }
+
+        return alias.genericName
+    }
+
+    private func medicationNameCandidate(from lines: [String], excludingBrand brand: String?) -> String? {
+        for line in lines.prefix(10) {
+            let lowercasedLine = line.lowercased()
+            if Self.blockedMedicationNamePrefixes.contains(where: { lowercasedLine.hasPrefix($0) }) {
+                continue
+            }
+
+            if let extracted = extractedMedicationNameFromStrengthLine(line),
+               isAcceptableMedicationName(extracted, excludingBrand: brand) {
+                return extracted
+            }
+
+            let candidate = sanitizedMedicationCandidate(line)
+            if isAcceptableMedicationName(candidate, excludingBrand: brand) {
+                return candidate
+            }
+        }
+
+        return nil
+    }
+
+    private func knownGenericName(in line: String, preferredBrand: String?) -> String? {
+        let normalizedLine = normalizedScanToken(line)
+        let prioritizedAliases = prioritizedMedicationAliases(preferredBrand: preferredBrand)
+
+        for alias in prioritizedAliases {
+            for token in alias.genericTokens {
+                let normalizedToken = normalizedScanToken(token)
+                guard !normalizedToken.isEmpty else { continue }
+                if normalizedLine.contains(normalizedToken) {
+                    return alias.genericName
+                }
+            }
+        }
+
+        return nil
+    }
+
+    private func prioritizedMedicationAliases(preferredBrand: String?) -> [MedicationLabelAlias] {
+        guard let preferredBrand else { return Self.medicationLabelAliases }
+
+        return Self.medicationLabelAliases.sorted { left, right in
+            if left.brand == preferredBrand { return true }
+            if right.brand == preferredBrand { return false }
+            return left.brand < right.brand
+        }
+    }
+
+    private func extractedMedicationNameFromStrengthLine(_ line: String) -> String? {
+        let patterns = [
+            "(?i)(?:active ingredients?(?:\\s*\\([^\\)]*\\))?[:\\-\\s]*)?([A-Za-z][A-Za-z\\-]+(?:\\s+[A-Za-z][A-Za-z\\-]+){0,3})(?:\\s+(?:tablets?|capsules?|caplets?|softgels?|gelcaps?|liquid ?gels?|usp))*[,:/ ]+\\d+(?:\\.\\d+)?\\s?(?:mg|mcg|g|ml|units?)\\b",
+            "(?i)([A-Za-z][A-Za-z\\-]+(?:\\s+[A-Za-z][A-Za-z\\-]+){0,3})\\s+(?:tablets?|capsules?|caplets?|softgels?|gelcaps?|liquid ?gels?)\\b"
+        ]
+
+        for pattern in patterns {
+            let match = firstMatch(for: pattern, in: line)
+            if let candidate = match[safe: 1] {
+                let sanitized = sanitizedMedicationCandidate(candidate)
+                if !sanitized.isEmpty {
+                    return sanitized
+                }
+            }
+        }
+
+        return nil
+    }
+
+    private func sanitizedMedicationCandidate(_ raw: String) -> String {
+        var candidate = cleanScanLine(raw)
+        guard !candidate.isEmpty else { return "" }
+
+        candidate = replacingMatches(
+            for: "(?i)^compare to active ingredient in\\s+",
+            in: candidate,
+            with: ""
+        )
+        candidate = replacingMatches(
+            for: "(?i)^active ingredients?(?:\\s*\\([^\\)]*\\))?[:\\-\\s]*",
+            in: candidate,
+            with: ""
+        )
+        candidate = replacingMatches(
+            for: "(?i)^drug facts[:\\-\\s]*",
+            in: candidate,
+            with: ""
+        )
+        candidate = replacingMatches(
+            for: "(?i)\\b(tablets?|capsules?|caplets?|softgels?|gelcaps?|liquid ?gels?|usp|antihistamine|pain reliever(?:/fever reducer)?|fever reducer|decongestant|sleep aid|cough suppressant|expectorant|nasal decongestant|allergy relief|indoor(?:\\s*&\\s*| and )outdoor allergies|relief)\\b.*$",
+            in: candidate,
+            with: ""
+        )
+        candidate = replacingMatches(
+            for: "(?i)\\b\\d+(?:\\.\\d+)?\\s?(?:mg|mcg|g|ml|units?)\\b.*$",
+            in: candidate,
+            with: ""
+        )
+        candidate = candidate.trimmingCharacters(in: .punctuationCharacters.union(.whitespacesAndNewlines))
+
+        guard !nameLooksLikeMarketingCopy(candidate) else {
+            return ""
+        }
+
+        return prettifiedMedicationName(candidate)
+    }
+
+    private func isAcceptableMedicationName(_ candidate: String, excludingBrand brand: String?) -> Bool {
+        let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+
+        let normalizedCandidate = normalizedScanToken(trimmed)
+        guard normalizedCandidate.count >= 3 else { return false }
+
+        if let brand, normalizedCandidate == normalizedScanToken(brand) {
+            return false
+        }
+
+        if nameLooksLikeMarketingCopy(trimmed) {
+            return false
+        }
+
+        let wordCount = trimmed.split(separator: " ").count
+        return wordCount <= 4 && trimmed.count <= 40
+    }
+
+    private func nameLooksLikeMarketingCopy(_ name: String) -> Bool {
+        let normalizedName = normalizedScanToken(name)
+        guard !normalizedName.isEmpty else { return true }
+
+        return Self.blockedMedicationNameFragments.contains(where: { normalizedName.contains($0) })
+    }
+
+    private func containsDose(in line: String) -> Bool {
+        let lowercasedLine = line.lowercased()
+        return lowercasedLine.contains("mg")
+            || lowercasedLine.contains("mcg")
+            || lowercasedLine.contains("ml")
+            || lowercasedLine.contains("units")
+    }
+
+    private func resolvedBrandName(from raw: String) -> String? {
+        let cleaned = cleanScanLine(raw)
+        guard !cleaned.isEmpty else { return nil }
+
+        if knownGenericName(in: cleaned, preferredBrand: nil) != nil {
+            return nil
+        }
+
+        return brandCandidate(from: [cleaned]) ?? prettifiedMedicationName(cleaned)
+    }
+
+    private func resolvedMedicationName(from raw: String, fallback: String?, brand: String?) -> String? {
+        let candidate = sanitizedMedicationCandidate(raw)
+        if isAcceptableMedicationName(candidate, excludingBrand: brand) {
+            return candidate
+        }
+        return fallback
     }
 
     private func detectedForm(from text: String) -> DoseForm? {
@@ -792,6 +1288,13 @@ struct AddMedicationView: View {
         return sanitized
     }
 
+    private func normalizedScanToken(_ text: String) -> String {
+        text
+            .lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .joined()
+    }
+
     private func normalizedDoseUnit(_ unit: String) -> String {
         switch unit.lowercased() {
         case "ml":
@@ -818,6 +1321,15 @@ struct AddMedicationView: View {
             guard let stringRange = Range(matchRange, in: text) else { return "" }
             return String(text[stringRange])
         }
+    }
+
+    private func replacingMatches(for pattern: String, in text: String, with template: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return text
+        }
+
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        return regex.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: template)
     }
 
     private func formattedTime(_ date: Date) -> String {

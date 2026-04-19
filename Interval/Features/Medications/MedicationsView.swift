@@ -1313,8 +1313,11 @@ struct MedicationsView: View {
                 dueNowTime(dose)
             }
             VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) { doseName(dose); dueNowBadge }
-                dueNowTime(dose)
+                doseName(dose)
+                HStack(spacing: 8) {
+                    dueNowBadge
+                    dueNowTime(dose)
+                }
             }
         }
     }
@@ -1332,10 +1335,12 @@ struct MedicationsView: View {
         Text("DUE NOW")
             .font(Theme.Font.body(10, weight: .bold))
             .tracking(0.4)
+            .lineLimit(1)
             .foregroundStyle(.white)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(Capsule().fill(Theme.Palette.coralDeep))
+            .fixedSize(horizontal: true, vertical: false)
     }
 
     private func dueNowTime(_ dose: ScheduledDose) -> some View {

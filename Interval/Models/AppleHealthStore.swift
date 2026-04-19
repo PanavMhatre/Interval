@@ -433,9 +433,15 @@ final class AppleHealthStore: ObservableObject {
                     return
                 }
 
-                let totalSeconds = (samples as? [HKCategorySample] ?? []).reduce(0.0) { partial, sample in
-                    guard asleepValues.contains(sample.value) else { return partial }
-                    return partial + sample.endDate.timeIntervalSince(sample.startDate)
+                let asleepSamples = (samples as? [HKCategorySample] ?? [])
+                let mergedIntervals = Self.mergedSleepIntervals(
+                    from: asleepSamples,
+                    start: start,
+                    end: end,
+                    asleepValues: asleepValues
+                )
+                let totalSeconds = mergedIntervals.reduce(0.0) { partial, interval in
+                    partial + interval.duration
                 }
 
                 continuation.resume(returning: totalSeconds / 3600)
@@ -443,6 +449,48 @@ final class AppleHealthStore: ObservableObject {
 
             healthStore.execute(query)
         }
+    }
+
+    private static func mergedSleepIntervals(
+        from samples: [HKCategorySample],
+        start: Date,
+        end: Date,
+        asleepValues: Set<Int>
+    ) -> [DateInterval] {
+        let intervals = samples
+            .compactMap { sample -> DateInterval? in
+                guard asleepValues.contains(sample.value) else { return nil }
+
+                let clampedStart = max(sample.startDate, start)
+                let clampedEnd = min(sample.endDate, end)
+                guard clampedEnd > clampedStart else { return nil }
+
+                return DateInterval(start: clampedStart, end: clampedEnd)
+            }
+            .sorted { lhs, rhs in
+                if lhs.start != rhs.start { return lhs.start < rhs.start }
+                return lhs.end < rhs.end
+            }
+
+        var merged: [DateInterval] = []
+
+        for interval in intervals {
+            guard let last = merged.last else {
+                merged.append(interval)
+                continue
+            }
+
+            if interval.start <= last.end {
+                merged[merged.count - 1] = DateInterval(
+                    start: last.start,
+                    end: max(last.end, interval.end)
+                )
+            } else {
+                merged.append(interval)
+            }
+        }
+
+        return merged
     }
 
     enum AppleHealthError: Error {
