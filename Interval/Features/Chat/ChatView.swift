@@ -2,6 +2,28 @@ import SwiftUI
 import SwiftData
 import Foundation
 
+// MARK: - Source citation model (Feature 2)
+
+struct ChatSource: Identifiable, Hashable {
+    let id = UUID()
+    let label: String
+    let icon: String
+    let accent: Color
+    let deepLink: DeepLink
+
+    enum DeepLink: Hashable {
+        case labResult(metric: String)
+        case medication(name: String)
+        case openFDA
+        case aiInference
+    }
+
+    static func == (lhs: ChatSource, rhs: ChatSource) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+}
+
+// MARK: - Message model
+
 struct ChatMessage: Identifiable, Hashable {
     enum Sender { case user, ai }
     let id = UUID()
@@ -9,7 +31,11 @@ struct ChatMessage: Identifiable, Hashable {
     var text: String
     var chips: [String] = []
     var isStreaming: Bool = false
+    var isEmergency: Bool = false       // Feature 1
+    var sources: [ChatSource] = []      // Feature 2
 }
+
+// MARK: - Supporting private types
 
 private enum ChatCalloutTone: String, Hashable {
     case positive
@@ -18,28 +44,28 @@ private enum ChatCalloutTone: String, Hashable {
     var fill: Color {
         switch self {
         case .positive: Theme.Palette.secondaryFixed
-        case .caution: Theme.Palette.errorContainer
+        case .caution:  Theme.Palette.errorContainer
         }
     }
 
     var border: Color {
         switch self {
         case .positive: Theme.Palette.secondaryContainer.opacity(0.45)
-        case .caution: Theme.Palette.error.opacity(0.22)
+        case .caution:  Theme.Palette.error.opacity(0.22)
         }
     }
 
     var foreground: Color {
         switch self {
         case .positive: Theme.Palette.secondary
-        case .caution: Theme.Palette.error
+        case .caution:  Theme.Palette.error
         }
     }
 
     var icon: String {
         switch self {
         case .positive: "lightbulb.fill"
-        case .caution: "exclamationmark.triangle.fill"
+        case .caution:  "exclamationmark.triangle.fill"
         }
     }
 }
@@ -55,23 +81,27 @@ private enum ChatRenderBlock: Hashable, Identifiable {
 
     var id: String {
         switch self {
-        case .paragraph(let text):
-            return "paragraph-\(text)"
-        case .labGraphic(let metric):
-            return "graphic-\(metric)"
-        case .trendGraphic(let metric):
-            return "trend-\(metric)"
-        case .medicationGraphic(let medication):
-            return "med-\(medication)"
-        case .simulationGraphic(let medication):
-            return "simulation-\(medication)"
-        case .interactionGraphic(let primary, let secondary):
-            return "interaction-\(primary)-\(secondary)"
-        case .callout(let text, let tone):
-            return "callout-\(tone.rawValue)-\(text)"
+        case .paragraph(let t):               "paragraph-\(t)"
+        case .labGraphic(let m):              "graphic-\(m)"
+        case .trendGraphic(let m):            "trend-\(m)"
+        case .medicationGraphic(let m):       "med-\(m)"
+        case .simulationGraphic(let m):       "simulation-\(m)"
+        case .interactionGraphic(let a, let b):"interaction-\(a)-\(b)"
+        case .callout(let t, let tone):       "callout-\(tone.rawValue)-\(t)"
         }
     }
 }
+
+// MARK: - Emergency keyword list
+
+private let emergencyKeywords: [String] = [
+    "chest pain", "can't breathe", "cannot breathe", "can not breathe",
+    "stroke", "suicidal", "suicide", "overdose", "severe bleeding",
+    "heart attack", "unconscious", "not breathing", "stop breathing",
+    "dying", "kill myself", "end my life"
+]
+
+// MARK: - Main view
 
 struct ChatView: View {
     @Environment(\.modelContext) private var context
@@ -85,6 +115,10 @@ struct ChatView: View {
     @State private var responding = false
     @State private var showingLoadedSummary = false
     @FocusState private var inputFocused: Bool
+
+    // Feature 1 & 2 sheet state
+    @State private var tappedSource: ChatSource? = nil
+    @State private var showMedicalDisclaimer = false
 
     private var profile: UserProfile? { profiles.first }
 
@@ -122,9 +156,21 @@ struct ChatView: View {
             ai.prepare(with: context)
             if messages.isEmpty { seed() }
         }
+        // Source chip deep-link sheet
+        .sheet(item: $tappedSource) { source in
+            sourceDetailSheet(source)
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+        }
+        // Medical disclaimer sheet
+        .sheet(isPresented: $showMedicalDisclaimer) {
+            medicalDisclaimerSheet
+                .presentationDetents([.fraction(0.45)])
+                .presentationDragIndicator(.visible)
+        }
     }
 
-    // MARK: Header
+    // MARK: - Header
 
     private var header: some View {
         SectionHeader(
@@ -136,6 +182,8 @@ struct ChatView: View {
         .padding(.vertical, Theme.Space.sm)
         .background(Theme.Palette.paper)
     }
+
+    // MARK: - Context preamble
 
     private var contextPreamble: some View {
         VStack(alignment: .leading, spacing: showingLoadedSummary ? 14 : 0) {
@@ -186,7 +234,7 @@ struct ChatView: View {
 
                     VStack(alignment: .leading, spacing: 10) {
                         contextSummaryRow("Conditions", value: conditionsSummary)
-                        contextSummaryRow("Allergies", value: allergiesSummary)
+                        contextSummaryRow("Allergies",  value: allergiesSummary)
                         contextSummaryRow("Medications", value: medicationsSummary)
                         contextSummaryRow("Latest lab", value: latestLabSummary)
                     }
@@ -204,8 +252,12 @@ struct ChatView: View {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(Theme.Palette.coralDeep)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Apple Intelligence off").font(Theme.Font.body(13, weight: .semibold)).foregroundStyle(Theme.Palette.ink)
-                Text(msg).font(Theme.Font.caption).foregroundStyle(Theme.Palette.inkSoft)
+                Text("Apple Intelligence off")
+                    .font(Theme.Font.body(13, weight: .semibold))
+                    .foregroundStyle(Theme.Palette.ink)
+                Text(msg)
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(Theme.Palette.inkSoft)
             }
         }
         .padding(Theme.Space.md)
@@ -214,13 +266,20 @@ struct ChatView: View {
         .overlay(RoundedRectangle(cornerRadius: Theme.Radius.md, style: .continuous).strokeBorder(Theme.Palette.coral.opacity(0.4), lineWidth: 1))
     }
 
-    // MARK: Message bubble
+    // MARK: - Message bubble
 
     @ViewBuilder
     private func messageBubble(_ msg: ChatMessage) -> some View {
         switch msg.sender {
         case .ai:
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 8) {
+
+                // ── Feature 1: Emergency callout ──────────────────────────
+                if msg.isEmergency {
+                    emergencyCalloutView
+                }
+
+                // ── Regular AI content ────────────────────────────────────
                 if msg.text.isEmpty && msg.isStreaming {
                     thinkingDots
                 } else {
@@ -228,6 +287,17 @@ struct ChatView: View {
                         .animation(.smooth(duration: 0.18), value: msg.text)
                 }
 
+                // ── Feature 2: Source chips ───────────────────────────────
+                if !msg.isStreaming && !msg.sources.isEmpty {
+                    sourceChipsRow(msg.sources)
+                }
+
+                // ── Feature 1: Disclaimer chip ────────────────────────────
+                if !msg.isStreaming {
+                    disclaimerChip
+                }
+
+                // ── Follow-up suggestion chips ────────────────────────────
                 if !msg.chips.isEmpty {
                     FlowLayout(spacing: 8) {
                         ForEach(msg.chips, id: \.self) { chip in
@@ -259,6 +329,7 @@ struct ChatView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+
         case .user:
             HStack {
                 Spacer(minLength: 40)
@@ -276,6 +347,119 @@ struct ChatView: View {
             .frame(maxWidth: .infinity, alignment: .trailing)
         }
     }
+
+    // MARK: - Feature 1: Emergency callout
+
+    private var emergencyCalloutView: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(.white)
+                Text("Get help now")
+                    .font(Theme.Font.body(18, weight: .bold))
+                    .foregroundStyle(.white)
+            }
+
+            Text("This sounds serious. If you or someone else is in immediate danger, please contact emergency services — don't wait.")
+                .font(Theme.Font.body(14, weight: .medium))
+                .foregroundStyle(.white.opacity(0.92))
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 10) {
+                Link(destination: URL(string: "tel://911")!) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "phone.fill")
+                            .font(.system(size: 13, weight: .bold))
+                        Text("Call 911")
+                            .font(Theme.Font.body(15, weight: .bold))
+                    }
+                    .foregroundStyle(Theme.Palette.error)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 11)
+                    .background(Capsule().fill(.white))
+                }
+
+                Link(destination: URL(string: "tel://988")!) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "phone.fill")
+                            .font(.system(size: 13, weight: .bold))
+                        Text("Crisis line · 988")
+                            .font(Theme.Font.body(15, weight: .bold))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 11)
+                    .background(Capsule().fill(.white.opacity(0.18)))
+                    .overlay(Capsule().strokeBorder(.white.opacity(0.35), lineWidth: 1))
+                }
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [Theme.Palette.error, Theme.Palette.secondary],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+        )
+        .shadow(color: Theme.Palette.error.opacity(0.3), radius: 16, y: 8)
+    }
+
+    // MARK: - Feature 2: Source chip row
+
+    private func sourceChipsRow(_ sources: [ChatSource]) -> some View {
+        FlowLayout(spacing: 6) {
+            ForEach(sources) { source in
+                Button {
+                    Haptics.tap()
+                    tappedSource = source
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: source.icon)
+                            .font(.system(size: 9, weight: .bold))
+                        Text(source.label)
+                            .font(Theme.Font.body(11, weight: .semibold))
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(source.accent)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(source.accent.opacity(0.1)))
+                    .overlay(Capsule().strokeBorder(source.accent.opacity(0.28), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    // MARK: - Feature 1: Disclaimer chip
+
+    private var disclaimerChip: some View {
+        Button {
+            Haptics.select()
+            showMedicalDisclaimer = true
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 9, weight: .semibold))
+                Text("Not a substitute for medical advice")
+                    .font(Theme.Font.body(10, weight: .medium))
+            }
+            .foregroundStyle(Theme.Palette.inkMuted)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(Theme.Palette.surfaceContainerLow))
+            .overlay(Capsule().strokeBorder(Theme.Palette.outlineVariant.opacity(0.5), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Thinking dots
 
     private var thinkingDots: some View {
         HStack(spacing: 4) {
@@ -295,7 +479,7 @@ struct ChatView: View {
         .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Theme.Palette.hairline, lineWidth: 1))
     }
 
-    // MARK: Input bar
+    // MARK: - Input bar
 
     private var inputBar: some View {
         VStack(spacing: 0) {
@@ -308,16 +492,16 @@ struct ChatView: View {
                         .foregroundStyle(Theme.Palette.inkMuted),
                     axis: .vertical
                 )
-                    .font(Theme.Font.bodyText)
-                    .foregroundStyle(Theme.Palette.ink)
-                    .tint(Theme.Palette.coralDeep)
-                    .focused($inputFocused)
-                    .lineLimit(1...4)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Theme.Palette.paperSoft))
-                    .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Theme.Palette.hairline, lineWidth: 1))
-                    .disabled(responding)
+                .font(Theme.Font.bodyText)
+                .foregroundStyle(Theme.Palette.ink)
+                .tint(Theme.Palette.coralDeep)
+                .focused($inputFocused)
+                .lineLimit(1...4)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Theme.Palette.paperSoft))
+                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Theme.Palette.hairline, lineWidth: 1))
+                .disabled(responding)
 
                 Button {
                     send(draft)
@@ -328,7 +512,9 @@ struct ChatView: View {
                         .frame(width: 42, height: 42)
                         .background(
                             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                .fill(draft.isEmpty && !responding ? Theme.Palette.inkMuted.opacity(0.4) : Theme.Palette.primary)
+                                .fill(draft.isEmpty && !responding
+                                      ? Theme.Palette.inkMuted.opacity(0.4)
+                                      : Theme.Palette.primary)
                         )
                 }
                 .buttonStyle(.plain)
@@ -340,7 +526,7 @@ struct ChatView: View {
         }
     }
 
-    // MARK: Conversation
+    // MARK: - Conversation logic
 
     private func seed() {
         let firstName = profile?.name.components(separatedBy: " ").first ?? "there"
@@ -348,70 +534,377 @@ struct ChatView: View {
             ChatMessage(
                 sender: .ai,
                 text: "Hi \(firstName). I have your latest conditions, meds, and labs loaded.\n\nAsk me anything.",
-                chips: ["What does my A1C mean?", "Any risky meds?", "Am I low on iron?"]
+                chips: ["What does my A1C mean?", "Any risky meds?", "Am I low on iron?"],
+                sources: [ChatSource(
+                    label: "Your chart",
+                    icon: "doc.text.fill",
+                    accent: Theme.Palette.primary,
+                    deepLink: .aiInference
+                )]
             )
         ]
     }
 
-    private func contextTag(_ text: String) -> some View {
-        Text(text)
-            .font(Theme.Font.body(12, weight: .medium))
-            .foregroundStyle(Theme.Palette.ink)
-            .lineLimit(1)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .fixedSize(horizontal: true, vertical: false)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Theme.Palette.surfaceContainerLowest)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(Theme.Palette.outlineVariant, lineWidth: 1)
-            )
-            .shadow(color: Theme.Shadow.ambient.opacity(0.25), radius: 6, y: 3)
-    }
+    private func send(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !responding else { return }
+        Haptics.tap()
 
-    private var contextSummaryText: String {
-        "Chat is grounding replies in your profile, medication list, allergies, and recent lab results so answers stay specific to your record."
-    }
+        // Feature 1: detect emergency before sending
+        let isEmerg = isEmergencyInput(trimmed)
 
-    private var conditionsSummary: String {
-        summarizedList(profile?.conditions, empty: "No conditions loaded")
-    }
+        messages.append(ChatMessage(sender: .user, text: trimmed))
+        draft = ""
 
-    private var allergiesSummary: String {
-        summarizedList(profile?.allergies, empty: "No allergies loaded")
-    }
+        let pending = ChatMessage(sender: .ai, text: "", isStreaming: true, isEmergency: isEmerg)
+        messages.append(pending)
+        let pendingID = pending.id
+        responding = true
 
-    private var medicationsSummary: String {
-        let names = medications.map(\.name)
-        return summarizedList(names, empty: "No active medications loaded")
-    }
+        Task {
+            defer { responding = false }
+            do {
+                switch ai.status {
+                case .available:
+                    let stream = ai.stream(userPrompt: trimmed)
+                    var finalText = ""
+                    for try await partial in stream {
+                        finalText = partial
+                        if let idx = messages.firstIndex(where: { $0.id == pendingID }) {
+                            messages[idx].text = displayResponseText(from: partial)
+                        }
+                    }
+                    if let idx = messages.firstIndex(where: { $0.id == pendingID }) {
+                        let rendered = decorateResponse(finalText, for: trimmed)
+                        messages[idx].text = rendered
+                        messages[idx].isStreaming = false
+                        messages[idx].sources = computeSources(prompt: trimmed, response: rendered)
+                    }
+                    Haptics.select()
 
-    private var latestLabSummary: String {
-        guard let latest = labs.first else { return "No recent labs loaded" }
-        return "\(latest.metric) \(latest.valueText) · \(latest.status.displayName)"
-    }
-
-    private func summarizedList(_ items: [String]?, empty: String) -> String {
-        guard let items, !items.isEmpty else { return empty }
-        return items.joined(separator: ", ")
-    }
-
-    private func contextSummaryRow(_ label: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(label.uppercased())
-                .font(Theme.Font.body(10, weight: .semibold))
-                .tracking(0.8)
-                .foregroundStyle(Theme.Palette.inkMuted)
-
-            Text(value)
-                .font(Theme.Font.body(14, weight: .medium))
-                .foregroundStyle(Theme.Palette.ink)
-                .fixedSize(horizontal: false, vertical: true)
+                case .unavailable:
+                    try await Task.sleep(nanoseconds: 800_000_000)
+                    if let idx = messages.firstIndex(where: { $0.id == pendingID }) {
+                        let rendered = decorateResponse(mockedReply(for: trimmed), for: trimmed)
+                        messages[idx].text = rendered
+                        messages[idx].isStreaming = false
+                        messages[idx].sources = computeSources(prompt: trimmed, response: rendered)
+                    }
+                }
+            } catch {
+                if let idx = messages.firstIndex(where: { $0.id == pendingID }) {
+                    messages[idx].text = "I couldn't finish that one — \(error.localizedDescription). Try rephrasing?"
+                    messages[idx].isStreaming = false
+                }
+                Haptics.error()
+            }
         }
     }
+
+    // MARK: - Feature 1: Emergency detection
+
+    private func isEmergencyInput(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        return emergencyKeywords.contains { lower.contains($0) }
+    }
+
+    // MARK: - Feature 2: Source computation
+
+    private func computeSources(prompt: String, response: String) -> [ChatSource] {
+        var sources: [ChatSource] = []
+        let combined = (prompt + " " + response).lowercased()
+
+        // Lab mention → "Your labs · Apr 15"
+        if let lab = labs.first(where: { combined.contains($0.metric.lowercased()) }) {
+            let dateStr = lab.capturedAt.formatted(.dateTime.month(.abbreviated).day())
+            sources.append(ChatSource(
+                label: "Your labs · \(dateStr)",
+                icon: "chart.bar.fill",
+                accent: Theme.Palette.primary,
+                deepLink: .labResult(metric: lab.metric)
+            ))
+        }
+
+        // Medication mention → "Your meds"
+        if let med = medications.first(where: { combined.contains($0.name.lowercased()) }) {
+            sources.append(ChatSource(
+                label: "Your meds",
+                icon: "pills.fill",
+                accent: Theme.Palette.sageDeep,
+                deepLink: .medication(name: med.name)
+            ))
+        }
+
+        // Drug/interaction language → openFDA
+        let fdaKeywords = ["interaction", "side effect", "contraindication", "fda", "prescrib", "drug class"]
+        if fdaKeywords.contains(where: { combined.contains($0) }) {
+            sources.append(ChatSource(
+                label: "openFDA",
+                icon: "building.columns.fill",
+                accent: Theme.Palette.tertiary,
+                deepLink: .openFDA
+            ))
+        }
+
+        // Fallback if nothing matched
+        if sources.isEmpty {
+            sources.append(ChatSource(
+                label: "AI inference · verify with your doctor",
+                icon: "sparkles",
+                accent: Theme.Palette.inkMuted,
+                deepLink: .aiInference
+            ))
+        }
+
+        return Array(sources.prefix(3))
+    }
+
+    // MARK: - Source detail sheets (Feature 2)
+
+    @ViewBuilder
+    private func sourceDetailSheet(_ source: ChatSource) -> some View {
+        switch source.deepLink {
+        case .labResult(let metric):
+            if let lab = labs.first(where: { normalizedToken($0.metric) == normalizedToken(metric) ||
+                                             normalizedToken($0.metric).contains(normalizedToken(metric)) }) {
+                labDetailSheet(lab)
+            } else {
+                genericSourceSheet(label: source.label, icon: source.icon, accent: source.accent,
+                                   body: "No matching lab result found in your records.")
+            }
+        case .medication(let name):
+            if let med = medications.first(where: { normalizedToken($0.name).contains(normalizedToken(name)) }) {
+                medicationDetailSheet(med)
+            } else {
+                genericSourceSheet(label: source.label, icon: source.icon, accent: source.accent,
+                                   body: "No matching medication found in your records.")
+            }
+        case .openFDA:
+            openFDASheet
+        case .aiInference:
+            medicalDisclaimerSheet
+        }
+    }
+
+    private func labDetailSheet(_ lab: LabResult) -> some View {
+        VStack(alignment: .leading, spacing: 20) {
+            sheetHandle
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle().fill(statusFill(for: lab.status)).frame(width: 48, height: 48)
+                    Image(systemName: "chart.bar.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(statusForeground(for: lab.status))
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(lab.metric)
+                        .font(Theme.Font.display(22, weight: .bold))
+                        .foregroundStyle(Theme.Palette.ink)
+                    Text(lab.capturedAt.formatted(.dateTime.month(.wide).day().year()))
+                        .font(Theme.Font.body(14, weight: .medium))
+                        .foregroundStyle(Theme.Palette.inkMuted)
+                }
+            }
+
+            VStack(spacing: 12) {
+                HStack {
+                    Text("Result")
+                        .font(Theme.Font.body(14, weight: .semibold))
+                        .foregroundStyle(Theme.Palette.inkMuted)
+                    Spacer()
+                    Text(lab.valueText)
+                        .font(Theme.Font.body(17, weight: .bold))
+                        .foregroundStyle(Theme.Palette.ink)
+                }
+                Divider()
+                HStack {
+                    Text("Status")
+                        .font(Theme.Font.body(14, weight: .semibold))
+                        .foregroundStyle(Theme.Palette.inkMuted)
+                    Spacer()
+                    Text(lab.status.displayName.capitalized)
+                        .font(Theme.Font.body(15, weight: .bold))
+                        .foregroundStyle(statusForeground(for: lab.status))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(Capsule().fill(statusFill(for: lab.status)))
+                }
+                if let low = lab.referenceLow, let high = lab.referenceHigh {
+                    Divider()
+                    HStack {
+                        Text("Reference range")
+                            .font(Theme.Font.body(14, weight: .semibold))
+                            .foregroundStyle(Theme.Palette.inkMuted)
+                        Spacer()
+                        Text("\(compactNumber(low))–\(compactNumber(high)) \(lab.unit)")
+                            .font(Theme.Font.body(15, weight: .semibold))
+                            .foregroundStyle(Theme.Palette.ink)
+                    }
+                }
+            }
+            .padding(Theme.Space.md)
+            .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Theme.Palette.card))
+            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Theme.Palette.hairline.opacity(0.7), lineWidth: 1))
+
+            Spacer()
+        }
+        .padding(Theme.Space.lg)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.Palette.paper)
+    }
+
+    private func medicationDetailSheet(_ med: Medication) -> some View {
+        VStack(alignment: .leading, spacing: 20) {
+            sheetHandle
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle().fill(Theme.Palette.sage).frame(width: 48, height: 48)
+                    Image(systemName: "pills.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(Theme.Palette.sageDeep)
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(med.name)
+                        .font(Theme.Font.display(22, weight: .bold))
+                        .foregroundStyle(Theme.Palette.ink)
+                    if let brand = med.brand {
+                        Text(brand)
+                            .font(Theme.Font.body(14, weight: .medium))
+                            .foregroundStyle(Theme.Palette.inkMuted)
+                    }
+                }
+            }
+
+            VStack(spacing: 12) {
+                detailRow("Dose",     value: med.doseText)
+                Divider()
+                detailRow("Schedule", value: med.scheduleText)
+                if let notes = med.notes, !notes.isEmpty {
+                    Divider()
+                    detailRow("Notes", value: notes)
+                }
+                if med.withFood || med.withWater {
+                    Divider()
+                    detailRow("Intake", value: [med.withFood ? "With food" : nil, med.withWater ? "With water" : nil].compactMap { $0 }.joined(separator: " · "))
+                }
+            }
+            .padding(Theme.Space.md)
+            .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Theme.Palette.card))
+            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Theme.Palette.hairline.opacity(0.7), lineWidth: 1))
+
+            Spacer()
+        }
+        .padding(Theme.Space.lg)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.Palette.paper)
+    }
+
+    private var openFDASheet: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            sheetHandle
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle().fill(Theme.Palette.tertiaryFixed).frame(width: 48, height: 48)
+                    Image(systemName: "building.columns.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(Theme.Palette.tertiary)
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("openFDA")
+                        .font(Theme.Font.display(22, weight: .bold))
+                        .foregroundStyle(Theme.Palette.ink)
+                    Text("U.S. Food & Drug Administration")
+                        .font(Theme.Font.body(13, weight: .medium))
+                        .foregroundStyle(Theme.Palette.inkMuted)
+                }
+            }
+
+            Text("Drug interaction and pharmacology information shown in this chat is derived from openFDA — the FDA's open dataset of approved drug labels, adverse events, and recalls.")
+                .font(Theme.Font.body(15, weight: .medium))
+                .foregroundStyle(Theme.Palette.inkSoft)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text("openFDA data is publicly available and updated by the FDA. It reflects information from approved drug labels and should not replace advice from your pharmacist or prescriber.")
+                .font(Theme.Font.body(14, weight: .medium))
+                .foregroundStyle(Theme.Palette.inkMuted)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Link("Open openFDA.gov ↗", destination: URL(string: "https://open.fda.gov")!)
+                .font(Theme.Font.body(15, weight: .bold))
+                .foregroundStyle(Theme.Palette.tertiary)
+
+            Spacer()
+        }
+        .padding(Theme.Space.lg)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.Palette.paper)
+    }
+
+    private var medicalDisclaimerSheet: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            sheetHandle
+            HStack(spacing: 12) {
+                Image(systemName: "cross.circle.fill")
+                    .font(.system(size: 26))
+                    .foregroundStyle(Theme.Palette.coralDeep)
+                Text("Medical disclaimer")
+                    .font(Theme.Font.display(22, weight: .bold))
+                    .foregroundStyle(Theme.Palette.ink)
+            }
+
+            Text("Interval provides health information based on data you've entered — your medications, lab results, and medical history. It is not a licensed medical professional and cannot diagnose, treat, or prevent any condition.")
+                .font(Theme.Font.body(15, weight: .medium))
+                .foregroundStyle(Theme.Palette.inkSoft)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text("Always consult a qualified healthcare provider before making any changes to your medication, diet, or treatment plan.")
+                .font(Theme.Font.body(15, weight: .medium))
+                .foregroundStyle(Theme.Palette.inkSoft)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer()
+        }
+        .padding(Theme.Space.lg)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.Palette.paper)
+    }
+
+    private func genericSourceSheet(label: String, icon: String, accent: Color, body: String) -> some View {
+        VStack(alignment: .leading, spacing: 20) {
+            sheetHandle
+            HStack(spacing: 12) {
+                Image(systemName: icon).font(.system(size: 22)).foregroundStyle(accent)
+                Text(label).font(Theme.Font.display(20, weight: .bold)).foregroundStyle(Theme.Palette.ink)
+            }
+            Text(body).font(Theme.Font.body(15, weight: .medium)).foregroundStyle(Theme.Palette.inkSoft)
+            Spacer()
+        }
+        .padding(Theme.Space.lg)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.Palette.paper)
+    }
+
+    private var sheetHandle: some View {
+        Capsule()
+            .fill(Theme.Palette.hairline)
+            .frame(width: 36, height: 4)
+            .frame(maxWidth: .infinity)
+    }
+
+    private func detailRow(_ label: String, value: String) -> some View {
+        HStack(alignment: .top) {
+            Text(label)
+                .font(Theme.Font.body(14, weight: .semibold))
+                .foregroundStyle(Theme.Palette.inkMuted)
+            Spacer()
+            Text(value)
+                .font(Theme.Font.body(14, weight: .semibold))
+                .foregroundStyle(Theme.Palette.ink)
+                .multilineTextAlignment(.trailing)
+        }
+    }
+
+    // MARK: - Existing graphic card builders (unchanged)
 
     private func assistantMessageCard(_ text: String) -> some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -435,29 +928,19 @@ struct ChatView: View {
     @ViewBuilder
     private func blockView(_ block: ChatRenderBlock) -> some View {
         switch block {
-        case .paragraph(let text):
-            paragraphText(text)
-                .foregroundStyle(Theme.Palette.ink)
-        case .labGraphic(let metric):
-            labGraphicCard(metric)
-        case .trendGraphic(let metric):
-            trendGraphicCard(metric)
-        case .medicationGraphic(let medication):
-            medicationGraphicCard(medication)
-        case .simulationGraphic(let medication):
-            simulationGraphicCard(medication)
-        case .interactionGraphic(let primary, let secondary):
-            interactionGraphicCard(primary, secondary)
-        case .callout(let text, let tone):
-            calloutCard(text: text, tone: tone)
+        case .paragraph(let text):              paragraphText(text).foregroundStyle(Theme.Palette.ink)
+        case .labGraphic(let metric):           labGraphicCard(metric)
+        case .trendGraphic(let metric):         trendGraphicCard(metric)
+        case .medicationGraphic(let med):       medicationGraphicCard(med)
+        case .simulationGraphic(let med):       simulationGraphicCard(med)
+        case .interactionGraphic(let a, let b): interactionGraphicCard(a, b)
+        case .callout(let text, let tone):      calloutCard(text: text, tone: tone)
         }
     }
 
     private func paragraphText(_ text: String) -> Text {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let attributed = try? AttributedString(markdown: trimmed) {
-            return Text(attributed)
-        }
+        if let attributed = try? AttributedString(markdown: trimmed) { return Text(attributed) }
         return Text(trimmed)
     }
 
@@ -466,75 +949,42 @@ struct ChatView: View {
         var blocks: [ChatRenderBlock] = []
         var paragraphLines: [String] = []
 
-        func flushParagraph() {
-            let paragraph = paragraphLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !paragraph.isEmpty else {
-                paragraphLines.removeAll()
-                return
-            }
-            blocks.append(.paragraph(paragraph))
-            paragraphLines.removeAll()
+        func flush() {
+            let p = paragraphLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !p.isEmpty else { paragraphLines.removeAll(); return }
+            blocks.append(.paragraph(p)); paragraphLines.removeAll()
         }
 
         for rawLine in lines {
             let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-
-            if line.isEmpty {
-                flushParagraph()
-                continue
-            }
-
-            if let block = parseGraphicToken(line) {
-                flushParagraph()
-                blocks.append(block)
-                continue
-            }
-
-            if let callout = parseCalloutToken(line) {
-                flushParagraph()
-                blocks.append(callout)
-                continue
-            }
-
+            if line.isEmpty       { flush(); continue }
+            if let b = parseGraphicToken(line)  { flush(); blocks.append(b); continue }
+            if let b = parseCalloutToken(line)  { flush(); blocks.append(b); continue }
             paragraphLines.append(line)
         }
-
-        flushParagraph()
+        flush()
         return blocks.isEmpty && !text.isEmpty ? [.paragraph(text)] : blocks
     }
 
     private func parseGraphicToken(_ line: String) -> ChatRenderBlock? {
         guard line.hasPrefix("[[graphic:"), line.hasSuffix("]]") else { return nil }
-
         let payload = String(line.dropFirst(10).dropLast(2))
-        let parts = payload.split(separator: ":").map(String.init)
+        let parts   = payload.split(separator: ":").map(String.init)
         guard let kind = parts.first else { return nil }
-
         switch kind {
-        case "lab":
-            guard parts.count >= 2 else { return nil }
-            return .labGraphic(parts[1])
-        case "trend":
-            guard parts.count >= 2 else { return nil }
-            return .trendGraphic(parts[1])
-        case "med":
-            guard parts.count >= 2 else { return nil }
-            return .medicationGraphic(parts[1])
-        case "simulation":
-            guard parts.count >= 2 else { return nil }
-            return .simulationGraphic(parts[1])
-        case "interaction":
-            guard parts.count >= 3 else { return nil }
-            return .interactionGraphic(parts[1], parts[2])
-        default:
-            return nil
+        case "lab":         return parts.count >= 2 ? .labGraphic(parts[1])         : nil
+        case "trend":       return parts.count >= 2 ? .trendGraphic(parts[1])       : nil
+        case "med":         return parts.count >= 2 ? .medicationGraphic(parts[1])  : nil
+        case "simulation":  return parts.count >= 2 ? .simulationGraphic(parts[1])  : nil
+        case "interaction": return parts.count >= 3 ? .interactionGraphic(parts[1], parts[2]) : nil
+        default: return nil
         }
     }
 
     private func parseCalloutToken(_ line: String) -> ChatRenderBlock? {
         guard line.hasPrefix("[[callout:"), line.hasSuffix("]]") else { return nil }
         let payload = String(line.dropFirst(10).dropLast(2))
-        let parts = payload.split(separator: ":", maxSplits: 1).map(String.init)
+        let parts   = payload.split(separator: ":", maxSplits: 1).map(String.init)
         guard parts.count == 2, let tone = ChatCalloutTone(rawValue: parts[0]) else { return nil }
         return .callout(text: parts[1], tone: tone)
     }
@@ -547,18 +997,14 @@ struct ChatView: View {
                     Text("\(lab.metric) Range")
                         .font(Theme.Font.body(15, weight: .semibold))
                         .foregroundStyle(Theme.Palette.ink)
-
                     Spacer()
-
                     Text(lab.status.displayName.uppercased())
                         .font(Theme.Font.body(10, weight: .bold))
                         .tracking(0.6)
                         .foregroundStyle(statusForeground(for: lab.status))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
+                        .padding(.horizontal, 8).padding(.vertical, 4)
                         .background(Capsule().fill(statusFill(for: lab.status)))
                 }
-
                 VStack(alignment: .leading, spacing: 8) {
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {
@@ -567,20 +1013,15 @@ struct ChatView: View {
                                 Rectangle().fill(Theme.Palette.secondaryFixed)
                                 Rectangle().fill(Theme.Palette.errorContainer)
                             }
-
                             Circle()
                                 .fill(Theme.Palette.inverseSurface)
                                 .frame(width: 14, height: 14)
-                                .overlay(
-                                    Circle()
-                                        .strokeBorder(Theme.Palette.surfaceContainerLowest, lineWidth: 2)
-                                )
+                                .overlay(Circle().strokeBorder(Theme.Palette.surfaceContainerLowest, lineWidth: 2))
                                 .offset(x: max(0, min(geo.size.width - 14, geo.size.width * rangePosition(for: lab) - 7)))
                         }
                     }
                     .frame(height: 12)
                     .clipShape(Capsule())
-
                     HStack {
                         Text(referenceLabel(for: lab.referenceLow))
                         Spacer()
@@ -594,14 +1035,8 @@ struct ChatView: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Theme.Palette.paperSoft)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(Theme.Palette.outlineVariant.opacity(0.9), lineWidth: 1)
-            )
+            .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Theme.Palette.paperSoft))
+            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Theme.Palette.outlineVariant.opacity(0.9), lineWidth: 1))
         }
     }
 
@@ -610,94 +1045,50 @@ struct ChatView: View {
         if let current = matchingLab(for: metric), let previous = previousLab(for: metric) {
             let delta = current.value - previous.value
             let improved = delta < 0
-
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .firstTextBaseline) {
                     Text("\(current.metric) Trend")
-                        .font(Theme.Font.body(15, weight: .semibold))
-                        .foregroundStyle(Theme.Palette.ink)
-
+                        .font(Theme.Font.body(15, weight: .semibold)).foregroundStyle(Theme.Palette.ink)
                     Spacer()
-
                     Text(trendDeltaText(delta, unit: current.unit))
-                        .font(Theme.Font.body(10, weight: .bold))
-                        .tracking(0.5)
+                        .font(Theme.Font.body(10, weight: .bold)).tracking(0.5)
                         .foregroundStyle(improved ? Theme.Palette.primary : Theme.Palette.secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(
-                            Capsule().fill(improved ? Theme.Palette.primaryFixed : Theme.Palette.secondaryFixed)
-                        )
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(Capsule().fill(improved ? Theme.Palette.primaryFixed : Theme.Palette.secondaryFixed))
                 }
-
                 HStack(spacing: 10) {
                     trendMetricTile(label: "Previous", value: compactValueText(for: previous), caption: shortDate(previous.capturedAt))
-
                     Image(systemName: improved ? "arrow.down.right" : "arrow.up.right")
                         .font(.system(size: 14, weight: .bold))
                         .foregroundStyle(improved ? Theme.Palette.primary : Theme.Palette.secondary)
-
                     trendMetricTile(label: "Latest", value: compactValueText(for: current), caption: shortDate(current.capturedAt))
                 }
-
-                Capsule()
-                    .fill(Theme.Palette.surfaceContainer)
-                    .frame(height: 8)
-                    .overlay(
-                        GeometryReader { proxy in
-                            let start = min(trendPosition(for: previous), trendPosition(for: current))
-                            let end = max(trendPosition(for: previous), trendPosition(for: current))
-                            Capsule()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [Theme.Palette.primaryFixedDim, improved ? Theme.Palette.primary : Theme.Palette.secondary],
-                                        startPoint: .leading,
-                                        endPoint: .trailing
-                                    )
-                                )
-                                .frame(width: max(16, proxy.size.width * max(0.08, end - start)), height: 8)
-                                .offset(x: proxy.size.width * start)
-                        }
-                    )
-
+                Capsule().fill(Theme.Palette.surfaceContainer).frame(height: 8)
+                    .overlay(GeometryReader { proxy in
+                        let start = min(trendPosition(for: previous), trendPosition(for: current))
+                        let end   = max(trendPosition(for: previous), trendPosition(for: current))
+                        Capsule()
+                            .fill(LinearGradient(colors: [Theme.Palette.primaryFixedDim, improved ? Theme.Palette.primary : Theme.Palette.secondary], startPoint: .leading, endPoint: .trailing))
+                            .frame(width: max(16, proxy.size.width * max(0.08, end - start)), height: 8)
+                            .offset(x: proxy.size.width * start)
+                    })
                 Text(improved ? "Your latest result moved down versus the previous lab." : "Your latest result moved up versus the previous lab.")
-                    .font(Theme.Font.body(12, weight: .medium))
-                    .foregroundStyle(Theme.Palette.inkSoft)
+                    .font(Theme.Font.body(12, weight: .medium)).foregroundStyle(Theme.Palette.inkSoft)
             }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Theme.Palette.surfaceContainerLow)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(Theme.Palette.outlineVariant.opacity(0.9), lineWidth: 1)
-            )
+            .padding(14).frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Theme.Palette.surfaceContainerLow))
+            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Theme.Palette.outlineVariant.opacity(0.9), lineWidth: 1))
         }
     }
 
     private func trendMetricTile(label: String, value: String, caption: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(label.uppercased())
-                .font(Theme.Font.body(10, weight: .semibold))
-                .tracking(0.7)
-                .foregroundStyle(Theme.Palette.inkMuted)
-
-            Text(value)
-                .font(Theme.Font.body(16, weight: .semibold))
-                .foregroundStyle(Theme.Palette.ink)
-
-            Text(caption)
-                .font(Theme.Font.body(11, weight: .medium))
-                .foregroundStyle(Theme.Palette.inkMuted)
+            Text(label.uppercased()).font(Theme.Font.body(10, weight: .semibold)).tracking(0.7).foregroundStyle(Theme.Palette.inkMuted)
+            Text(value).font(Theme.Font.body(16, weight: .semibold)).foregroundStyle(Theme.Palette.ink)
+            Text(caption).font(Theme.Font.body(11, weight: .medium)).foregroundStyle(Theme.Palette.inkMuted)
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Theme.Palette.surfaceContainerLowest)
-        )
+        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Theme.Palette.surfaceContainerLowest))
     }
 
     @ViewBuilder
@@ -706,54 +1097,28 @@ struct ChatView: View {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .top, spacing: 12) {
                     ZStack {
-                        Circle()
-                            .fill(Theme.Palette.secondaryFixed)
-                            .frame(width: 42, height: 42)
-
+                        Circle().fill(Theme.Palette.secondaryFixed).frame(width: 42, height: 42)
                         Image(systemName: medicationSymbol(for: medication.form))
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(Theme.Palette.secondary)
+                            .font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.Palette.secondary)
                     }
-
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(medication.name)
-                            .font(Theme.Font.body(17, weight: .semibold))
-                            .foregroundStyle(Theme.Palette.ink)
-
-                        Text("\(medication.doseText) · \(medication.scheduleText)")
-                            .font(Theme.Font.body(13, weight: .medium))
-                            .foregroundStyle(Theme.Palette.inkSoft)
+                        Text(medication.name).font(Theme.Font.body(17, weight: .semibold)).foregroundStyle(Theme.Palette.ink)
+                        Text("\(medication.doseText) · \(medication.scheduleText)").font(Theme.Font.body(13, weight: .medium)).foregroundStyle(Theme.Palette.inkSoft)
                     }
-
                     Spacer()
                 }
-
                 FlowLayout(spacing: 8) {
-                    if medication.withFood {
-                        infoChip("With food", icon: "fork.knife", fill: Theme.Palette.secondaryFixed, foreground: Theme.Palette.secondary)
-                    }
-                    if medication.withWater {
-                        infoChip("With water", icon: "drop.fill", fill: Theme.Palette.primaryFixed, foreground: Theme.Palette.primary)
-                    }
+                    if medication.withFood  { infoChip("With food",  icon: "fork.knife",         fill: Theme.Palette.secondaryFixed, foreground: Theme.Palette.secondary) }
+                    if medication.withWater { infoChip("With water", icon: "drop.fill",           fill: Theme.Palette.primaryFixed,   foreground: Theme.Palette.primary) }
                     infoChip(medication.form.displayName, icon: "circle.grid.2x2.fill", fill: Theme.Palette.surfaceContainerHigh, foreground: Theme.Palette.inkSoft)
                 }
-
                 if let notes = medication.notes, !notes.isEmpty {
-                    Text(notes)
-                        .font(Theme.Font.body(12, weight: .medium))
-                        .foregroundStyle(Theme.Palette.inkSoft)
+                    Text(notes).font(Theme.Font.body(12, weight: .medium)).foregroundStyle(Theme.Palette.inkSoft)
                 }
             }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Theme.Palette.surfaceContainerLow)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(Theme.Palette.outlineVariant.opacity(0.9), lineWidth: 1)
-            )
+            .padding(14).frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Theme.Palette.surfaceContainerLow))
+            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Theme.Palette.outlineVariant.opacity(0.9), lineWidth: 1))
         }
     }
 
@@ -762,192 +1127,121 @@ struct ChatView: View {
         if let medication = matchingMedication(for: medicationName) {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text("\(medication.name) Scenario Planner")
-                        .font(Theme.Font.body(15, weight: .semibold))
-                        .foregroundStyle(Theme.Palette.ink)
-
+                    Text("\(medication.name) Scenario Planner").font(Theme.Font.body(15, weight: .semibold)).foregroundStyle(Theme.Palette.ink)
                     Spacer()
-
-                    Text("WHAT IF")
-                        .font(Theme.Font.body(10, weight: .bold))
-                        .tracking(0.6)
-                        .foregroundStyle(Theme.Palette.secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
+                    Text("WHAT IF").font(Theme.Font.body(10, weight: .bold)).tracking(0.6)
+                        .foregroundStyle(Theme.Palette.secondary).padding(.horizontal, 8).padding(.vertical, 4)
                         .background(Capsule().fill(Theme.Palette.secondaryFixed))
                 }
-
                 VStack(spacing: 8) {
-                    scenarioRow(
-                        title: "Usual plan",
-                        detail: medication.scheduleText,
-                        caption: intakeSummary(for: medication)
-                    )
-                    scenarioRow(
-                        title: "If timing shifts",
-                        detail: "Stay close to your normal routine",
-                        caption: "Log it clearly instead of guessing later."
-                    )
-                    scenarioRow(
-                        title: "If you're unsure",
-                        detail: "Check the label or your clinician's instructions",
-                        caption: "Especially before taking an extra dose."
-                    )
+                    scenarioRow(title: "Usual plan",        detail: medication.scheduleText,              caption: intakeSummary(for: medication))
+                    scenarioRow(title: "If timing shifts",  detail: "Stay close to your normal routine",  caption: "Log it clearly instead of guessing later.")
+                    scenarioRow(title: "If you're unsure",  detail: "Check the label or your clinician's instructions", caption: "Especially before taking an extra dose.")
                 }
             }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Theme.Palette.primaryFixed)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(Theme.Palette.primaryFixedDim.opacity(0.9), lineWidth: 1)
-            )
+            .padding(14).frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Theme.Palette.primaryFixed))
+            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Theme.Palette.primaryFixedDim.opacity(0.9), lineWidth: 1))
         }
     }
 
     private func scenarioRow(title: String, detail: String, caption: String) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(title.uppercased())
-                .font(Theme.Font.body(10, weight: .semibold))
-                .tracking(0.7)
-                .foregroundStyle(Theme.Palette.primary)
-
-            Text(detail)
-                .font(Theme.Font.body(14, weight: .semibold))
-                .foregroundStyle(Theme.Palette.ink)
-
-            Text(caption)
-                .font(Theme.Font.body(11, weight: .medium))
-                .foregroundStyle(Theme.Palette.inkSoft)
+            Text(title.uppercased()).font(Theme.Font.body(10, weight: .semibold)).tracking(0.7).foregroundStyle(Theme.Palette.primary)
+            Text(detail).font(Theme.Font.body(14, weight: .semibold)).foregroundStyle(Theme.Palette.ink)
+            Text(caption).font(Theme.Font.body(11, weight: .medium)).foregroundStyle(Theme.Palette.inkSoft)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Theme.Palette.surfaceContainerLowest)
-        )
+        .frame(maxWidth: .infinity, alignment: .leading).padding(12)
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.Palette.surfaceContainerLowest))
     }
 
     private func interactionGraphicCard(_ primary: String, _ secondary: String) -> some View {
         let summary = interactionSummary(primary: primary, secondary: secondary)
-
         return VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
-                Text("Interaction Check")
-                    .font(Theme.Font.body(15, weight: .semibold))
-                    .foregroundStyle(Theme.Palette.ink)
-
+                Text("Interaction Check").font(Theme.Font.body(15, weight: .semibold)).foregroundStyle(Theme.Palette.ink)
                 Spacer()
-
-                Text(summary.risk.uppercased())
-                    .font(Theme.Font.body(10, weight: .bold))
-                    .tracking(0.6)
-                    .foregroundStyle(summary.accent)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
+                Text(summary.risk.uppercased()).font(Theme.Font.body(10, weight: .bold)).tracking(0.6)
+                    .foregroundStyle(summary.accent).padding(.horizontal, 8).padding(.vertical, 4)
                     .background(Capsule().fill(summary.fill))
             }
-
             HStack(spacing: 10) {
                 interactionMedicationPill(name: primary, accent: summary.accent)
-                Image(systemName: "arrow.left.and.right")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(summary.accent)
+                Image(systemName: "arrow.left.and.right").font(.system(size: 12, weight: .bold)).foregroundStyle(summary.accent)
                 interactionMedicationPill(name: secondary, accent: Theme.Palette.ink)
             }
-
-            Text(summary.body)
-                .font(Theme.Font.body(13, weight: .medium))
-                .foregroundStyle(Theme.Palette.ink)
-
-            Text(summary.nextStep)
-                .font(Theme.Font.body(12, weight: .medium))
-                .foregroundStyle(Theme.Palette.inkSoft)
+            Text(summary.body).font(Theme.Font.body(13, weight: .medium)).foregroundStyle(Theme.Palette.ink)
+            Text(summary.nextStep).font(Theme.Font.body(12, weight: .medium)).foregroundStyle(Theme.Palette.inkSoft)
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(summary.fill.opacity(0.9))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(summary.accent.opacity(0.2), lineWidth: 1)
-        )
+        .padding(14).frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(summary.fill.opacity(0.9)))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(summary.accent.opacity(0.2), lineWidth: 1))
     }
 
     private func interactionMedicationPill(name: String, accent: Color) -> some View {
-        Text(name)
-            .font(Theme.Font.body(12, weight: .semibold))
-            .foregroundStyle(Theme.Palette.ink)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Theme.Palette.surfaceContainerLowest)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(accent.opacity(0.22), lineWidth: 1)
-            )
+        Text(name).font(Theme.Font.body(12, weight: .semibold)).foregroundStyle(Theme.Palette.ink)
+            .padding(.horizontal, 12).padding(.vertical, 9)
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.Palette.surfaceContainerLowest))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(accent.opacity(0.22), lineWidth: 1))
     }
 
     private func calloutCard(text: String, tone: ChatCalloutTone) -> some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: tone.icon)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(tone.foreground)
-                .padding(.top, 2)
-
-            paragraphText(text)
-                .foregroundStyle(Theme.Palette.ink)
+            Image(systemName: tone.icon).font(.system(size: 14, weight: .semibold)).foregroundStyle(tone.foreground).padding(.top, 2)
+            paragraphText(text).foregroundStyle(Theme.Palette.ink)
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(tone.fill)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(tone.border, lineWidth: 1)
-        )
+        .padding(14).frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(tone.fill))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(tone.border, lineWidth: 1))
     }
 
-    private func matchingLab(for metric: String) -> LabResult? {
-        let target = normalizedToken(metric)
-        return labs.first {
-            let current = normalizedToken($0.metric)
-            return current == target || current.contains(target) || target.contains(current)
+    // MARK: - Context summary helpers
+
+    private func contextTag(_ text: String) -> some View {
+        Text(text).font(Theme.Font.body(12, weight: .medium)).foregroundStyle(Theme.Palette.ink).lineLimit(1)
+            .padding(.horizontal, 12).padding(.vertical, 8).fixedSize(horizontal: true, vertical: false)
+            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Theme.Palette.surfaceContainerLowest))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.Palette.outlineVariant, lineWidth: 1))
+            .shadow(color: Theme.Shadow.ambient.opacity(0.25), radius: 6, y: 3)
+    }
+
+    private var contextSummaryText: String { "Chat is grounding replies in your profile, medication list, allergies, and recent lab results so answers stay specific to your record." }
+    private var conditionsSummary:  String { summarizedList(profile?.conditions, empty: "No conditions loaded") }
+    private var allergiesSummary:   String { summarizedList(profile?.allergies,  empty: "No allergies loaded") }
+    private var medicationsSummary: String { summarizedList(medications.map(\.name), empty: "No active medications loaded") }
+    private var latestLabSummary:   String { labs.first.map { "\($0.metric) \($0.valueText) · \($0.status.displayName)" } ?? "No recent labs loaded" }
+
+    private func summarizedList(_ items: [String]?, empty: String) -> String {
+        guard let items, !items.isEmpty else { return empty }
+        return items.joined(separator: ", ")
+    }
+
+    private func contextSummaryRow(_ label: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label.uppercased()).font(Theme.Font.body(10, weight: .semibold)).tracking(0.8).foregroundStyle(Theme.Palette.inkMuted)
+            Text(value).font(Theme.Font.body(14, weight: .medium)).foregroundStyle(Theme.Palette.ink).fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    // MARK: - Data lookup helpers
+
+    private func matchingLab(for metric: String) -> LabResult? {
+        let t = normalizedToken(metric)
+        return labs.first { let c = normalizedToken($0.metric); return c == t || c.contains(t) || t.contains(c) }
     }
 
     private func previousLab(for metric: String) -> LabResult? {
-        let target = normalizedToken(metric)
-        let matches = labs.filter {
-            let current = normalizedToken($0.metric)
-            return current == target || current.contains(target) || target.contains(current)
-        }
-        guard matches.count > 1 else { return nil }
-        return matches[1]
+        let t = normalizedToken(metric)
+        let matches = labs.filter { let c = normalizedToken($0.metric); return c == t || c.contains(t) || t.contains(c) }
+        return matches.count > 1 ? matches[1] : nil
     }
 
     private func matchingMedication(for text: String) -> Medication? {
-        let target = normalizedToken(text)
+        let t = normalizedToken(text)
         return medications.first {
             let name = normalizedToken($0.name)
-            if name == target || name.contains(target) || target.contains(name) {
-                return true
-            }
-
-            if let brand = $0.brand {
-                let brandName = normalizedToken(brand)
-                return brandName == target || brandName.contains(target) || target.contains(brandName)
-            }
-
+            if name == t || name.contains(t) || t.contains(name) { return true }
+            if let brand = $0.brand { let b = normalizedToken(brand); return b == t || b.contains(t) || t.contains(b) }
             return false
         }
     }
@@ -956,354 +1250,153 @@ struct ChatView: View {
         text.lowercased().replacingOccurrences(of: " ", with: "")
     }
 
-    private func referenceLabel(for value: Double?) -> String {
-        guard let value else { return "Range" }
-        return compactNumber(value)
-    }
+    // MARK: - Number / formatting helpers
 
-    private func compactValueText(for lab: LabResult) -> String {
-        "\(compactNumber(lab.value)) \(lab.unit)"
-    }
-
+    private func referenceLabel(for value: Double?) -> String { value.map { compactNumber($0) } ?? "Range" }
+    private func compactValueText(for lab: LabResult) -> String { "\(compactNumber(lab.value)) \(lab.unit)" }
     private func compactNumber(_ value: Double) -> String {
-        value.truncatingRemainder(dividingBy: 1) == 0
-            ? "\(Int(value))"
-            : String(format: "%.1f", value)
+        value.truncatingRemainder(dividingBy: 1) == 0 ? "\(Int(value))" : String(format: "%.1f", value)
     }
+    private func shortDate(_ date: Date) -> String { date.formatted(.dateTime.month(.abbreviated).day()) }
+    private func trendDeltaText(_ delta: Double, unit: String) -> String { "\(delta > 0 ? "+" : "")\(compactNumber(delta)) \(unit)" }
 
     private func rangePosition(for lab: LabResult) -> CGFloat {
         guard let low = lab.referenceLow, let high = lab.referenceHigh, high > low else { return 0.5 }
-        let spread = high - low
-        let minBound = low - spread * 0.35
-        let maxBound = high + spread * 0.35
-        guard maxBound > minBound else { return 0.5 }
-        return max(0.05, min(0.95, (lab.value - minBound) / (maxBound - minBound)))
+        let spread = high - low; let min = low - spread * 0.35; let max = high + spread * 0.35
+        guard max > min else { return 0.5 }
+        return Swift.max(0.05, Swift.min(0.95, (lab.value - min) / (max - min)))
     }
 
     private func trendPosition(for lab: LabResult) -> CGFloat {
-        guard let current = matchingLab(for: lab.metric),
-              let previous = previousLab(for: lab.metric)
-        else { return 0.5 }
-
-        let minValue = min(current.value, previous.value)
-        let maxValue = max(current.value, previous.value)
-        guard maxValue > minValue else { return 0.5 }
-        return max(0.05, min(0.95, (lab.value - minValue) / (maxValue - minValue)))
+        guard let current = matchingLab(for: lab.metric), let previous = previousLab(for: lab.metric) else { return 0.5 }
+        let minV = Swift.min(current.value, previous.value); let maxV = Swift.max(current.value, previous.value)
+        guard maxV > minV else { return 0.5 }
+        return Swift.max(0.05, Swift.min(0.95, (lab.value - minV) / (maxV - minV)))
     }
 
-    private func trendDeltaText(_ delta: Double, unit: String) -> String {
-        let prefix = delta > 0 ? "+" : ""
-        return "\(prefix)\(compactNumber(delta)) \(unit)"
+    private func statusFill(for status: LabStatus) -> Color {
+        switch status { case .normal: Theme.Palette.primaryFixed; case .low: Theme.Palette.secondaryFixed; case .high: Theme.Palette.errorContainer }
     }
-
-    private func shortDate(_ date: Date) -> String {
-        date.formatted(.dateTime.month(.abbreviated).day())
+    private func statusForeground(for status: LabStatus) -> Color {
+        switch status { case .normal: Theme.Palette.primary; case .low: Theme.Palette.secondary; case .high: Theme.Palette.error }
     }
 
     private func medicationSymbol(for form: DoseForm) -> String {
         switch form {
-        case .tablet, .capsule:
-            return "pills.fill"
-        case .liquid, .drops:
-            return "drop.fill"
-        case .injection:
-            return "syringe.fill"
-        case .patch:
-            return "cross.case.fill"
-        case .inhaler:
-            return "cross.vial.fill"
+        case .tablet, .capsule: "pills.fill"; case .liquid, .drops: "drop.fill"
+        case .injection: "syringe.fill"; case .patch: "cross.case.fill"; case .inhaler: "cross.vial.fill"
         }
     }
 
     private func infoChip(_ text: String, icon: String, fill: Color, foreground: Color) -> some View {
         HStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(size: 10, weight: .semibold))
-            Text(text)
-                .font(Theme.Font.body(11, weight: .semibold))
-                .lineLimit(1)
+            Image(systemName: icon).font(.system(size: 10, weight: .semibold))
+            Text(text).font(Theme.Font.body(11, weight: .semibold)).lineLimit(1)
         }
-        .foregroundStyle(foreground)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .fixedSize(horizontal: true, vertical: false)
-        .background(Capsule().fill(fill))
+        .foregroundStyle(foreground).padding(.horizontal, 10).padding(.vertical, 7)
+        .fixedSize(horizontal: true, vertical: false).background(Capsule().fill(fill))
     }
 
     private func intakeSummary(for medication: Medication) -> String {
         var parts: [String] = []
-        if medication.withFood { parts.append("with food") }
+        if medication.withFood  { parts.append("with food") }
         if medication.withWater { parts.append("with water") }
         return parts.isEmpty ? "No special intake note on file." : "Usually taken " + parts.joined(separator: " and ") + "."
     }
 
     private func interactionSummary(primary: String, secondary: String) -> (risk: String, body: String, nextStep: String, fill: Color, accent: Color) {
         let pair = [normalizedToken(primary), normalizedToken(secondary)]
-
         if pair.contains("ibuprofen"), pair.contains("lisinopril") {
-            return (
-                risk: "Careful",
-                body: "This pair can push blood pressure up and add kidney stress if it becomes a repeated pattern.",
-                nextStep: "Short-term use is the safer case. Spacing it out, staying hydrated, and checking with a clinician is the best next move.",
-                fill: Theme.Palette.secondaryFixed,
-                accent: Theme.Palette.secondary
-            )
+            return ("Careful", "This pair can push blood pressure up and add kidney stress if it becomes a repeated pattern.",
+                    "Short-term use is the safer case. Spacing it out, staying hydrated, and checking with a clinician is the best next move.",
+                    Theme.Palette.secondaryFixed, Theme.Palette.secondary)
         }
-
-        return (
-            risk: "Review",
-            body: "This combination is worth double-checking before you make it part of your routine.",
-            nextStep: "Use the chart as a prompt to confirm the pair with your pharmacist or clinician.",
-            fill: Theme.Palette.surfaceContainerHigh,
-            accent: Theme.Palette.ink
-        )
+        return ("Review", "This combination is worth double-checking before you make it part of your routine.",
+                "Use the chart as a prompt to confirm the pair with your pharmacist or clinician.",
+                Theme.Palette.surfaceContainerHigh, Theme.Palette.ink)
     }
 
-    private func statusFill(for status: LabStatus) -> Color {
-        switch status {
-        case .normal: Theme.Palette.primaryFixed
-        case .low: Theme.Palette.secondaryFixed
-        case .high: Theme.Palette.errorContainer
-        }
-    }
+    // MARK: - Response decoration (unchanged)
 
-    private func statusForeground(for status: LabStatus) -> Color {
-        switch status {
-        case .normal: Theme.Palette.primary
-        case .low: Theme.Palette.secondary
-        case .high: Theme.Palette.error
-        }
-    }
-
-    private func send(_ text: String) {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !responding else { return }
-        Haptics.tap()
-        messages.append(ChatMessage(sender: .user, text: trimmed))
-        draft = ""
-
-        // Placeholder AI bubble we stream into
-        let pending = ChatMessage(sender: .ai, text: "", isStreaming: true)
-        messages.append(pending)
-        let pendingID = pending.id
-        responding = true
-
-        Task {
-            defer { responding = false }
-            do {
-                switch ai.status {
-                case .available:
-                    let stream = ai.stream(userPrompt: trimmed)
-                    var finalText = ""
-                    for try await partial in stream {
-                        finalText = partial
-                        if let idx = messages.firstIndex(where: { $0.id == pendingID }) {
-                            messages[idx].text = displayResponseText(from: partial)
-                        }
-                    }
-                    if let idx = messages.firstIndex(where: { $0.id == pendingID }) {
-                        let rendered = decorateResponse(finalText, for: trimmed)
-                        messages[idx].text = rendered
-                        messages[idx].isStreaming = false
-                    }
-                    Haptics.select()
-                case .unavailable:
-                    try await Task.sleep(nanoseconds: 800_000_000)
-                    if let idx = messages.firstIndex(where: { $0.id == pendingID }) {
-                        messages[idx].text = decorateResponse(mockedReply(for: trimmed), for: trimmed)
-                        messages[idx].isStreaming = false
-                    }
-                }
-            } catch {
-                if let idx = messages.firstIndex(where: { $0.id == pendingID }) {
-                    messages[idx].text = "I couldn't finish that one — \(error.localizedDescription). Try rephrasing?"
-                    messages[idx].isStreaming = false
-                }
-                Haptics.error()
-            }
-        }
-    }
-
-    private func displayResponseText(from raw: String) -> String {
-        normalizeResponseText(stripRenderTokens(from: raw))
-    }
+    private func displayResponseText(from raw: String) -> String { normalizeResponseText(stripRenderTokens(from: raw)) }
 
     private func decorateResponse(_ raw: String, for prompt: String) -> String {
         var text = normalizeResponseText(raw)
-
-        guard !containsRenderTokens(in: text) else {
-            return text
-        }
-
+        guard !containsRenderTokens(in: text) else { return text }
         var tokens: [String] = []
-
         if let metric = suggestedGraphicMetric(for: prompt, response: text) {
             tokens.append("[[graphic:lab:\(metric)]]")
-
-            if previousLab(for: metric) != nil {
-                tokens.append("[[graphic:trend:\(metric)]]")
-            }
-
-            if let callout = suggestedCallout(for: metric) {
-                tokens.append("[[callout:\(callout.tone.rawValue):\(callout.text)]]")
-            }
+            if previousLab(for: metric) != nil { tokens.append("[[graphic:trend:\(metric)]]") }
+            if let callout = suggestedCallout(for: metric) { tokens.append("[[callout:\(callout.tone.rawValue):\(callout.text)]]") }
         }
-
         if let pair = suggestedInteractionPair(for: prompt, response: text) {
             tokens.append("[[graphic:interaction:\(pair.primary):\(pair.secondary)]]")
         } else if let medication = suggestedMedication(for: prompt, response: text) {
             tokens.append("[[graphic:med:\(medication.name)]]")
-
-            if shouldShowSimulation(for: prompt, response: text) {
-                tokens.append("[[graphic:simulation:\(medication.name)]]")
-            }
+            if shouldShowSimulation(for: prompt, response: text) { tokens.append("[[graphic:simulation:\(medication.name)]]") }
         }
-
-        if !tokens.isEmpty {
-            text = conciseResponseText(text)
-            text += "\n\n" + tokens.joined(separator: "\n")
-        }
-
+        if !tokens.isEmpty { text = conciseResponseText(text); text += "\n\n" + tokens.joined(separator: "\n") }
         return text
     }
 
-    private func containsRenderTokens(in text: String) -> Bool {
-        text.contains("[[graphic:") || text.contains("[[callout:")
-    }
-
+    private func containsRenderTokens(in text: String) -> Bool { text.contains("[[graphic:") || text.contains("[[callout:") }
     private func stripRenderTokens(from text: String) -> String {
-        text
-            .components(separatedBy: .newlines)
-            .filter { line in
-                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-                return !trimmed.hasPrefix("[[graphic:") && !trimmed.hasPrefix("[[callout:")
-            }
+        text.components(separatedBy: .newlines)
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("[[") }
             .joined(separator: "\n")
     }
-
     private func normalizeResponseText(_ text: String) -> String {
-        var normalized = text.replacingOccurrences(of: "\r\n", with: "\n")
-        while normalized.contains("\n\n\n") {
-            normalized = normalized.replacingOccurrences(of: "\n\n\n", with: "\n\n")
-        }
-        return normalized.trimmingCharacters(in: .whitespacesAndNewlines)
+        var n = text.replacingOccurrences(of: "\r\n", with: "\n")
+        while n.contains("\n\n\n") { n = n.replacingOccurrences(of: "\n\n\n", with: "\n\n") }
+        return n.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func suggestedGraphicMetric(for prompt: String, response: String) -> String? {
-        let haystack = normalizedToken(prompt + " " + response)
-
-        if let directMatch = labs.first(where: { haystack.contains(normalizedToken($0.metric)) }) {
-            return directMatch.metric
-        }
-
-        if haystack.contains("lab") || haystack.contains("result") || haystack.contains("range") {
-            return labs.first?.metric
-        }
-
+        let h = normalizedToken(prompt + " " + response)
+        if let m = labs.first(where: { h.contains(normalizedToken($0.metric)) }) { return m.metric }
+        if h.contains("lab") || h.contains("result") || h.contains("range") { return labs.first?.metric }
         return nil
     }
-
     private func suggestedMedication(for prompt: String, response: String) -> Medication? {
-        let haystack = normalizedToken(prompt + " " + response)
-
-        return medications.first {
-            let medName = normalizedToken($0.name)
-            if haystack.contains(medName) {
-                return true
-            }
-
-            if let brand = $0.brand {
-                return haystack.contains(normalizedToken(brand))
-            }
-
-            return false
-        }
+        let h = normalizedToken(prompt + " " + response)
+        return medications.first { let n = normalizedToken($0.name); if h.contains(n) { return true }; if let b = $0.brand { return h.contains(normalizedToken(b)) }; return false }
     }
-
     private func suggestedInteractionPair(for prompt: String, response: String) -> (primary: String, secondary: String)? {
-        let haystack = normalizedToken(prompt + " " + response)
-
-        if haystack.contains("ibuprofen"), medications.contains(where: { normalizedToken($0.name).contains("lisinopril") }) {
-            return ("Ibuprofen", "Lisinopril")
-        }
-
+        let h = normalizedToken(prompt + " " + response)
+        if h.contains("ibuprofen"), medications.contains(where: { normalizedToken($0.name).contains("lisinopril") }) { return ("Ibuprofen", "Lisinopril") }
         return nil
     }
-
     private func shouldShowSimulation(for prompt: String, response: String) -> Bool {
-        let haystack = normalizedToken(prompt + " " + response)
-        return haystack.contains("whatif") ||
-            haystack.contains("simulate") ||
-            haystack.contains("scenario") ||
-            haystack.contains("late") ||
-            haystack.contains("miss") ||
-            haystack.contains("skip")
+        let h = normalizedToken(prompt + " " + response)
+        return h.contains("whatif") || h.contains("simulate") || h.contains("scenario") || h.contains("late") || h.contains("miss") || h.contains("skip")
     }
-
     private func conciseResponseText(_ text: String) -> String {
-        let paragraphs = text
-            .components(separatedBy: "\n\n")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-
-        guard !paragraphs.isEmpty else { return text }
-
-        let shortened = Array(paragraphs.prefix(2)).joined(separator: "\n\n")
-        guard shortened.count > 320 else { return shortened }
-
-        let prefix = String(shortened.prefix(317))
-        if let lastSpace = prefix.lastIndex(of: " ") {
-            return String(prefix[..<lastSpace]) + "..."
-        }
-        return prefix + "..."
+        let ps = text.components(separatedBy: "\n\n").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        guard !ps.isEmpty else { return text }
+        let s = Array(ps.prefix(2)).joined(separator: "\n\n")
+        guard s.count > 320 else { return s }
+        let p = String(s.prefix(317))
+        return (p.lastIndex(of: " ").map { String(p[..<$0]) } ?? p) + "..."
     }
-
     private func suggestedCallout(for metric: String) -> (tone: ChatCalloutTone, text: String)? {
         guard let lab = matchingLab(for: metric) else { return nil }
-
         if normalizedToken(lab.metric).contains("a1c") && lab.status == .high {
             return (.positive, "Prediabetes often improves with steady food, movement, and medication habits over time.")
         }
-
         switch lab.status {
-        case .normal:
-            return (.positive, "\(lab.metric) is sitting inside the lab's reference range right now.")
-        case .low:
-            return (.caution, "\(lab.metric) is below range, so it is worth reviewing the trend with your clinician.")
-        case .high:
-            return (.caution, "\(lab.metric) is above range, so keep an eye on the trend and follow up if it keeps climbing.")
+        case .normal: return (.positive, "\(lab.metric) is sitting inside the lab's reference range right now.")
+        case .low:    return (.caution,  "\(lab.metric) is below range, so it is worth reviewing the trend with your clinician.")
+        case .high:   return (.caution,  "\(lab.metric) is above range, so keep an eye on the trend and follow up if it keeps climbing.")
         }
     }
-
-    // Fallback used only when Apple Intelligence isn't available.
     private func mockedReply(for prompt: String) -> String {
         let lower = prompt.lowercased()
-        if lower.contains("a1c") {
-            return """
-            Your latest A1C is 6.2%, up from 5.9% in February.
-
-            That is still in the prediabetes range, but it is a level many people improve with steady food, movement, and medication habits.
-            """
-        }
-        if lower.contains("iron") {
-            return """
-            Your iron is 52 ug/dL, which is still below the reference range but better than February's 46.
-
-            The trend is moving the right way. Keep taking the supplement in the morning and away from calcium when you can.
-            """
-        }
+        if lower.contains("a1c") { return "Your latest A1C is 6.2%, up from 5.9% in February.\n\nThat is still in the prediabetes range, but it is a level many people improve with steady food, movement, and medication habits." }
+        if lower.contains("iron") { return "Your iron is 52 ug/dL, which is still below the reference range but better than February's 46.\n\nThe trend is moving the right way. Keep taking the supplement in the morning and away from calcium when you can." }
         if lower.contains("ibuprofen") || lower.contains("interact") || lower.contains("risky") {
-            return """
-            Ibuprofen with Lisinopril can put extra stress on your kidneys and may push blood pressure up.
-
-            Short-term use is usually the safer case, but spacing it out, using the lowest dose, and staying hydrated is a better pattern to discuss with your clinician.
-            """
+            return "Ibuprofen with Lisinopril can put extra stress on your kidneys and may push blood pressure up.\n\nShort-term use is usually the safer case, but spacing it out, using the lowest dose, and staying hydrated is a better pattern to discuss with your clinician."
         }
-        return """
-        Here is the quick picture from your chart: 3 active meds, A1C 6.2%, iron 52 ug/dL, and BP 128/82.
-
-        Tell me what you want to focus on and I will break it down clearly.
-        """
+        return "Here is the quick picture from your chart: 3 active meds, A1C 6.2%, iron 52 ug/dL, and BP 128/82.\n\nTell me what you want to focus on and I will break it down clearly."
     }
 }
 
