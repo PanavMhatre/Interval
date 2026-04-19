@@ -386,15 +386,19 @@ struct OnboardingView: View {
                 "",
                 text: text,
                 prompt: Text(placeholder)
-                    .foregroundStyle(.white.opacity(0.76))
+                    .foregroundStyle(Theme.Palette.inkMuted)
             )
             .textFieldStyle(.plain)
             .font(Theme.Font.bodyText)
             .padding(.horizontal, 18)
             .padding(.vertical, 12)
-            .background(Capsule().fill(Theme.Palette.ink))
-            .foregroundStyle(.white)
-            .tint(.white)
+            .background(Capsule().fill(Theme.Palette.card))
+            .overlay(
+                Capsule()
+                    .strokeBorder(Theme.Palette.hairline, lineWidth: 1)
+            )
+            .foregroundStyle(Theme.Palette.ink)
+            .tint(Theme.Palette.ink)
             .frame(maxWidth: 220)
             .textInputAutocapitalization(isNumeric ? .never : .words)
             .keyboardType(isNumeric ? .numberPad : .default)
