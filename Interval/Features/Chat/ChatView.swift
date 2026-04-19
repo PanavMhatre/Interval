@@ -310,7 +310,10 @@ struct ChatView: View {
                 if msg.text.isEmpty && msg.isStreaming {
                     thinkingDots
                 } else if !msg.text.isEmpty {
-                    assistantMessageCard(msg.text)
+                    assistantMessageCard(
+                        msg.text,
+                        showsDisclaimerIcon: shouldShowIntroDisclaimer(for: msg)
+                    )
                         .animation(.smooth(duration: 0.18), value: msg.text)
                 }
 
@@ -344,14 +347,6 @@ struct ChatView: View {
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                // ── Feature 1: Disclaimer chip ────────────────────────────
-                if !msg.isStreaming {
-                    HStack {
-                        Spacer()
-                        disclaimerChip
-                    }
                 }
 
                 // ── Feature 2: Source chips ───────────────────────────────
@@ -492,6 +487,12 @@ struct ChatView: View {
                 .accessibilityHint("Opens the medical disclaimer")
         }
         .buttonStyle(.plain)
+    }
+
+    private func shouldShowIntroDisclaimer(for message: ChatMessage) -> Bool {
+        guard !message.isStreaming else { return false }
+        guard let firstAIMessage = messages.first(where: { $0.sender == .ai }) else { return false }
+        return firstAIMessage.id == message.id
     }
 
     // MARK: - Thinking dots
@@ -930,10 +931,18 @@ struct ChatView: View {
 
     // MARK: - Existing graphic card builders (unchanged)
 
-    private func assistantMessageCard(_ text: String) -> some View {
+    private func assistantMessageCard(_ text: String, showsDisclaimerIcon: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             ForEach(messageBlocks(from: text)) { block in
                 blockView(block)
+            }
+
+            if showsDisclaimerIcon {
+                HStack {
+                    disclaimerChip
+                    Spacer()
+                }
+                .padding(.top, 2)
             }
         }
         .frame(maxWidth: 320, alignment: .leading)
