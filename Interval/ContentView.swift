@@ -25,13 +25,18 @@ struct ContentView: View {
         }
         .environmentObject(appleHealth)
         .animation(.smooth(duration: 0.45), value: profiles.first?.hasCompletedOnboarding)
+        .preferredColorScheme(.light)
         .onAppear {
             SampleData.seedIfNeeded(context)
-            configureTabBarAppearance()
             if !didPrepareHaptics {
                 Haptics.prepareAll()
                 didPrepareHaptics = true
             }
+        }
+        .task {
+            // Auto-link Apple Health on every launch. Apple's authorization
+            // dialog only appears once; subsequent launches refresh silently.
+            await appleHealth.bootstrap()
         }
     }
 
@@ -58,6 +63,8 @@ struct ContentView: View {
                 .tag(Tab.profile)
         }
         .tint(Theme.Palette.primary)
+        .toolbarBackground(Theme.Palette.surfaceContainerLowest, for: .tabBar)
+        .toolbarBackground(.visible, for: .tabBar)
         .onChange(of: selection) { _, _ in
             Haptics.select()
         }
@@ -66,8 +73,17 @@ struct ContentView: View {
     private func tabLabel(_ title: String, selected tab: Tab, activeSymbol: String, inactiveSymbol: String) -> some View {
         Label(title, systemImage: selection == tab ? activeSymbol : inactiveSymbol)
     }
+}
 
-    private func configureTabBarAppearance() {
+// MARK: - One-shot UIKit tab bar appearance
+
+/// Applied exactly once at process launch (see `IntervalApp.init`). Setting
+/// `UITabBar.appearance()` only affects tab bars created *after* the call, so
+/// we must run this before SwiftUI instantiates the TabView. Applying it in
+/// `.onAppear` caused a one-frame flicker where the system default (light in
+/// light mode, dark in dark mode) painted before our custom chrome took over.
+enum TabBarStyle {
+    static func apply() {
         let appearance = UITabBarAppearance()
         appearance.configureWithOpaqueBackground()
         appearance.backgroundColor = UIColor(Theme.Palette.surfaceContainerLowest)
@@ -92,9 +108,10 @@ struct ContentView: View {
         appearance.inlineLayoutAppearance = appearance.stackedLayoutAppearance
         appearance.compactInlineLayoutAppearance = appearance.stackedLayoutAppearance
 
-        UITabBar.appearance().standardAppearance = appearance
-        UITabBar.appearance().scrollEdgeAppearance = appearance
-        UITabBar.appearance().unselectedItemTintColor = UIColor(Theme.Palette.onSurfaceVariant)
+        let proxy = UITabBar.appearance()
+        proxy.standardAppearance = appearance
+        proxy.scrollEdgeAppearance = appearance
+        proxy.unselectedItemTintColor = UIColor(Theme.Palette.onSurfaceVariant)
     }
 }
 

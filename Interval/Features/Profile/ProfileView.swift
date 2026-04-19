@@ -165,7 +165,7 @@ struct ProfileView: View {
                 }
 
                 LazyVGrid(columns: profileSummaryColumns, spacing: 10) {
-                    headerStat(title: "Blood", value: profile?.bloodType ?? "—")
+                    headerStat(title: "Blood", value: resolvedBloodType ?? "—")
                     headerStat(title: "Height", value: heightString)
                     headerStat(title: "Conditions", value: "\(profile?.conditions.count ?? 0)")
                 }
@@ -174,14 +174,26 @@ struct ProfileView: View {
     }
 
     private var headerLine: String {
-        let age = profile.map { String($0.age) } ?? "—"
-        let sex = profile?.sex ?? "Unknown"
-        return "\(age) years old • \(sex)"
+        // HealthKit is the only source of truth for age and biological sex.
+        // If Apple Health hasn't provided values yet, show dashes rather than
+        // fall back to seeded placeholder data.
+        let ageString = appleHealth.characteristics.age.map(String.init) ?? "—"
+        let sexString = appleHealth.characteristics.sex ?? "Not set"
+        return "\(ageString) years old • \(sexString)"
     }
 
     private var heightString: String {
-        guard let inches = profile?.heightInches else { return "—" }
+        guard let inches = appleHealth.characteristics.heightInches, inches > 0 else {
+            return "—"
+        }
         return "\(inches / 12)'\(inches % 12)\""
+    }
+
+    private var resolvedBloodType: String? {
+        guard let blood = appleHealth.characteristics.bloodType, !blood.isEmpty else {
+            return nil
+        }
+        return blood
     }
 
     private var profileSummaryColumns: [GridItem] {

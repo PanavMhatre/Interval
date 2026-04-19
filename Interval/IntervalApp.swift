@@ -3,6 +3,14 @@ import SwiftData
 
 @main
 struct IntervalApp: App {
+    init() {
+        // Must run before SwiftUI instantiates the TabView — the UITabBar
+        // appearance proxy only affects tab bars created after it's set.
+        // Configuring later would cause a one-frame flash of the system
+        // default (light/dark) chrome on first tab tap.
+        TabBarStyle.apply()
+    }
+
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
             UserProfile.self,

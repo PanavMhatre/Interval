@@ -260,11 +260,11 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 4YLXFJ94F3;
+				DEVELOPMENT_TEAM = 7K6CXFJBDB;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Interval uses the camera to scan lab results and prescriptions on-device.";
-				INFOPLIST_KEY_NSHealthShareUsageDescription = "Interval reads your Apple Health data to show live steps, sleep, hydration, and heart rate on-device.";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "Interval reads your Apple Health profile — age, biological sex, blood type, height — plus live steps, sleep, hydration, and heart rate, all on-device.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Interval reads lab images you pick to add them to your health profile.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -276,7 +276,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.pmhatre.interval;
+				PRODUCT_BUNDLE_IDENTIFIER = com.pmatre.Interval;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -298,11 +298,11 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 4YLXFJ94F3;
+				DEVELOPMENT_TEAM = 7K6CXFJBDB;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Interval uses the camera to scan lab results and prescriptions on-device.";
-				INFOPLIST_KEY_NSHealthShareUsageDescription = "Interval reads your Apple Health data to show live steps, sleep, hydration, and heart rate on-device.";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "Interval reads your Apple Health profile — age, biological sex, blood type, height — plus live steps, sleep, hydration, and heart rate, all on-device.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Interval reads lab images you pick to add them to your health profile.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -314,7 +314,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.pmhatre.interval;
+				PRODUCT_BUNDLE_IDENTIFIER = com.pmatre.Interval;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;

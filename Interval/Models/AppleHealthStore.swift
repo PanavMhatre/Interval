@@ -4,6 +4,17 @@ import HealthKit
 
 @MainActor
 final class AppleHealthStore: ObservableObject {
+    struct Characteristics: Equatable {
+        var age: Int?
+        var sex: String?          // "Female", "Male", "Other"
+        var bloodType: String?    // "O+", "A-", etc.
+        var heightInches: Int?
+
+        var hasAny: Bool {
+            age != nil || sex != nil || bloodType != nil || heightInches != nil
+        }
+    }
+
     struct Snapshot: Equatable {
         var stepsToday: Double?
         var sleepHours: Double?
@@ -66,6 +77,7 @@ final class AppleHealthStore: ObservableObject {
     }
 
     @Published private(set) var snapshot: Snapshot
+    @Published private(set) var characteristics: Characteristics = Characteristics()
     @Published private(set) var isConnected: Bool
     @Published private(set) var isLoading = false
     @Published private(set) var lastError: String?
@@ -87,7 +99,8 @@ final class AppleHealthStore: ObservableObject {
     init(
         defaults: UserDefaults = .standard,
         previewSnapshot: Snapshot? = nil,
-        previewConnected: Bool? = nil
+        previewConnected: Bool? = nil,
+        previewCharacteristics: Characteristics? = nil
     ) {
         self.defaults = defaults
 
@@ -96,6 +109,9 @@ final class AppleHealthStore: ObservableObject {
             self.isConnected = previewConnected ?? true
             self.healthStore = nil
             self.lastError = nil
+            if let previewCharacteristics {
+                self.characteristics = previewCharacteristics
+            }
             return
         }
 
@@ -121,6 +137,30 @@ final class AppleHealthStore: ObservableObject {
         }
     }
 
+    /// Silently re-asks for authorization and refreshes. Safe to call on every
+    /// app launch — `HKHealthStore.requestAuthorization` does not re-show the
+    /// system dialog once the user has answered, so this quietly syncs in the
+    /// background. On a fresh install the dialog appears once.
+    func bootstrap() async {
+        guard isAvailable else {
+            lastError = "Apple Health isn't available on this device."
+            return
+        }
+
+        do {
+            try await requestAuthorization()
+            setConnected(true)
+            await refresh(force: true)
+        } catch {
+            // Leave `isConnected` untouched so the user can still tap "Connect"
+            // to retry, but don't show an error if they simply haven't answered
+            // the dialog yet.
+            if isConnected {
+                lastError = "Couldn't refresh Apple Health right now."
+            }
+        }
+    }
+
     func refreshIfNeeded(force: Bool = false) async {
         guard isConnected else { return }
         guard force || shouldRefresh else { return }
@@ -130,6 +170,7 @@ final class AppleHealthStore: ObservableObject {
     func disableSync() {
         lastError = nil
         snapshot = Snapshot()
+        characteristics = Characteristics()
         defaults.removeObject(forKey: lastSyncKey)
         setConnected(false)
     }
@@ -189,6 +230,12 @@ final class AppleHealthStore: ObservableObject {
             unit: HKUnit.count().unitDivided(by: .minute())
         )
 
+        async let heightInchesRaw: Double? = try? latestQuantity(
+            in: healthStore,
+            identifier: .height,
+            unit: .inch()
+        )
+
         let newSnapshot = Snapshot(
             stepsToday: await stepsToday,
             sleepHours: await sleepHours,
@@ -197,9 +244,56 @@ final class AppleHealthStore: ObservableObject {
             lastSync: now
         )
 
+        let resolvedHeight = await heightInchesRaw.map { Int($0.rounded()) }
+        characteristics = readCharacteristics(from: healthStore, heightInches: resolvedHeight)
+
         snapshot = newSnapshot
         defaults.set(now, forKey: lastSyncKey)
         isLoading = false
+    }
+
+    private func readCharacteristics(from healthStore: HKHealthStore, heightInches: Int?) -> Characteristics {
+        let age: Int? = {
+            guard let components = try? healthStore.dateOfBirthComponents(),
+                  let birthDate = Calendar.current.date(from: components) else { return nil }
+            let years = Calendar.current.dateComponents([.year], from: birthDate, to: Date()).year
+            guard let years, years > 0, years < 130 else { return nil }
+            return years
+        }()
+
+        let sex: String? = {
+            guard let object = try? healthStore.biologicalSex() else { return nil }
+            switch object.biologicalSex {
+            case .female: return "Female"
+            case .male:   return "Male"
+            case .other:  return "Other"
+            case .notSet: return nil
+            @unknown default: return nil
+            }
+        }()
+
+        let bloodType: String? = {
+            guard let object = try? healthStore.bloodType() else { return nil }
+            switch object.bloodType {
+            case .aPositive:  return "A+"
+            case .aNegative:  return "A-"
+            case .bPositive:  return "B+"
+            case .bNegative:  return "B-"
+            case .abPositive: return "AB+"
+            case .abNegative: return "AB-"
+            case .oPositive:  return "O+"
+            case .oNegative:  return "O-"
+            case .notSet:     return nil
+            @unknown default: return nil
+            }
+        }()
+
+        return Characteristics(
+            age: age,
+            sex: sex,
+            bloodType: bloodType,
+            heightInches: heightInches
+        )
     }
 
     private func requestAuthorization() async throws {
@@ -227,7 +321,11 @@ final class AppleHealthStore: ObservableObject {
             HKObjectType.quantityType(forIdentifier: .stepCount),
             HKObjectType.quantityType(forIdentifier: .dietaryWater),
             HKObjectType.quantityType(forIdentifier: .restingHeartRate),
-            HKObjectType.categoryType(forIdentifier: .sleepAnalysis)
+            HKObjectType.quantityType(forIdentifier: .height),
+            HKObjectType.categoryType(forIdentifier: .sleepAnalysis),
+            HKObjectType.characteristicType(forIdentifier: .dateOfBirth),
+            HKObjectType.characteristicType(forIdentifier: .biologicalSex),
+            HKObjectType.characteristicType(forIdentifier: .bloodType)
         ]
         .forEach { type in
             if let type {
@@ -364,7 +462,13 @@ extension AppleHealthStore {
                 restingHeartRate: 62,
                 lastSync: .now
             ),
-            previewConnected: true
+            previewConnected: true,
+            previewCharacteristics: Characteristics(
+                age: 34,
+                sex: "Female",
+                bloodType: "O+",
+                heightInches: 66
+            )
         )
     }
 
