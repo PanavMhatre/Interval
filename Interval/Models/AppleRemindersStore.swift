@@ -19,12 +19,15 @@ struct ReminderImportResult {
 
 enum AppleRemindersError: LocalizedError {
     case accessDenied
+    case accessRestricted
     case noCalendar
 
     var errorDescription: String? {
         switch self {
         case .accessDenied:
             return "Allow Reminders access in Settings so Interval can add today's medications for you."
+        case .accessRestricted:
+            return "Reminders access is restricted on this device, so Interval can't add medication reminders right now."
         case .noCalendar:
             return "Apple Reminders is available, but no reminder list is ready for new items on this device."
         }
@@ -48,9 +51,10 @@ final class AppleRemindersStore {
         let granted = try await requestReminderAccess()
         guard granted else { throw AppleRemindersError.accessDenied }
 
-        guard let reminderCalendar = store.defaultCalendarForNewReminders() ?? store.calendars(for: .reminder).first else {
-            throw AppleRemindersError.noCalendar
-        }
+        store.reset()
+        store.refreshSourcesIfNecessary()
+
+        let reminderCalendar = try writableReminderCalendar()
 
         let bounds = dayBounds(for: drafts.map(\.scheduledTime))
         let existingReminders = await existingIncompleteReminders(
@@ -81,17 +85,36 @@ final class AppleRemindersStore {
             reminder.dueDateComponents = components
             reminder.alarms = [EKAlarm(absoluteDate: draft.scheduledTime)]
 
-            try store.save(reminder, commit: true)
+            try store.save(reminder, commit: false)
 
             knownKeys.insert(key)
             addedCount += 1
+        }
+
+        if addedCount > 0 {
+            try store.commit()
         }
 
         return ReminderImportResult(addedCount: addedCount, skippedCount: skippedCount)
     }
 
     private func requestReminderAccess() async throws -> Bool {
-        try await withCheckedThrowingContinuation { continuation in
+        switch EKEventStore.authorizationStatus(for: .reminder) {
+        case .fullAccess, .authorized:
+            return true
+        case .writeOnly:
+            return true
+        case .denied:
+            return false
+        case .restricted:
+            throw AppleRemindersError.accessRestricted
+        case .notDetermined:
+            break
+        @unknown default:
+            return false
+        }
+
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Bool, Error>) in
             store.requestFullAccessToReminders { granted, error in
                 if let error {
                     continuation.resume(throwing: error)
@@ -100,6 +123,56 @@ final class AppleRemindersStore {
                 }
             }
         }
+    }
+
+    private func writableReminderCalendar() throws -> EKCalendar {
+        if let defaultCalendar = store.defaultCalendarForNewReminders(),
+           defaultCalendar.allowsContentModifications {
+            return defaultCalendar
+        }
+
+        if let existingCalendar = store.calendars(for: .reminder).first(where: \.allowsContentModifications) {
+            return existingCalendar
+        }
+
+        if let intervalCalendar = store.calendars(for: .reminder).first(where: {
+            $0.title == "Interval" && $0.allowsContentModifications
+        }) {
+            return intervalCalendar
+        }
+
+        return try createIntervalReminderCalendar()
+    }
+
+    private func createIntervalReminderCalendar() throws -> EKCalendar {
+        guard let source = writableReminderSource() else {
+            throw AppleRemindersError.noCalendar
+        }
+
+        let calendar = EKCalendar(for: .reminder, eventStore: store)
+        calendar.title = "Interval"
+        calendar.source = source
+
+        do {
+            try store.saveCalendar(calendar, commit: true)
+            return calendar
+        } catch {
+            throw AppleRemindersError.noCalendar
+        }
+    }
+
+    private func writableReminderSource() -> EKSource? {
+        let preferredTypes: [EKSourceType] = [.local, .mobileMe, .calDAV, .exchange]
+
+        for sourceType in preferredTypes {
+            if let source = store.sources.first(where: { $0.sourceType == sourceType }) {
+                return source
+            }
+        }
+
+        return store.sources.first(where: {
+            $0.sourceType != .subscribed && $0.sourceType != .birthdays
+        })
     }
 
     private func existingIncompleteReminders(

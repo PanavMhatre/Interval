@@ -266,6 +266,7 @@
 				INFOPLIST_KEY_NSCameraUsageDescription = "Interval uses the camera to scan lab results and prescriptions on-device.";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Interval reads your Apple Health profile — age, biological sex, blood type, height — plus live steps, sleep, hydration, and heart rate, all on-device.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Interval reads lab images you pick to add them to your health profile.";
+				INFOPLIST_KEY_NSRemindersUsageDescription = "Interval adds today's medication schedule to Apple Reminders when you ask it to.";
 				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "Interval adds today's medication schedule to Apple Reminders when you ask it to.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -306,6 +307,7 @@
 				INFOPLIST_KEY_NSCameraUsageDescription = "Interval uses the camera to scan lab results and prescriptions on-device.";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Interval reads your Apple Health profile — age, biological sex, blood type, height — plus live steps, sleep, hydration, and heart rate, all on-device.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Interval reads lab images you pick to add them to your health profile.";
+				INFOPLIST_KEY_NSRemindersUsageDescription = "Interval adds today's medication schedule to Apple Reminders when you ask it to.";
 				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "Interval adds today's medication schedule to Apple Reminders when you ask it to.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
