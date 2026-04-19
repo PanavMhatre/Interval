@@ -42,7 +42,10 @@ struct ContentView: View {
 
     private var mainTabs: some View {
         TabView(selection: $selection) {
-            NavigationStack { HomeView().navigationBarHidden(true) }
+            NavigationStack {
+                HomeView(onProfileTap: { selection = .profile })
+                    .navigationBarHidden(true)
+            }
                 .tabItem { tabLabel("HOME", selected: .home, activeSymbol: "house.fill", inactiveSymbol: "house") }
                 .tag(Tab.home)
 

@@ -15,6 +15,12 @@ struct HomeView: View {
     @State private var tappedInsightSource: ChatSource?
     @State private var selectedTrendTarget: TrendSheetTarget?
 
+    let onProfileTap: (() -> Void)?
+
+    init(onProfileTap: (() -> Void)? = nil) {
+        self.onProfileTap = onProfileTap
+    }
+
     private var profile: UserProfile? { profiles.first }
 
     var body: some View {
@@ -55,7 +61,13 @@ struct HomeView: View {
                     .foregroundStyle(Theme.Palette.ink)
             }
             Spacer()
-            AvatarCircle(initials: profile?.initials ?? "?", size: 44)
+            Button {
+                Haptics.tap()
+                onProfileTap?()
+            } label: {
+                AvatarCircle(initials: profile?.initials ?? "?", size: 44)
+            }
+            .buttonStyle(.plain)
         }
     }
 
