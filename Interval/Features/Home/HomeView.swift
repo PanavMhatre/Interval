@@ -10,6 +10,9 @@ struct HomeView: View {
     @Query(sort: [SortDescriptor(\LabResult.capturedAt, order: .reverse)]) private var labs: [LabResult]
     @Query(filter: #Predicate<HealthInsight> { !$0.dismissed }, sort: [SortDescriptor(\HealthInsight.createdAt, order: .reverse)])
     private var insights: [HealthInsight]
+    @Query(sort: [SortDescriptor(\LabResult.capturedAt, order: .reverse)]) private var labResults: [LabResult]
+
+    @State private var tappedInsightSource: ChatSource?
 
     @State private var selectedTrendTarget: TrendSheetTarget?
 
@@ -36,6 +39,9 @@ struct HomeView: View {
             MetricTrendSheet(metric: target.metric, labs: labs)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $tappedInsightSource) { source in
+            insightSourceSheet(source)
         }
     }
 
@@ -170,21 +176,196 @@ struct HomeView: View {
         Group {
             if let first = insights.first {
                 let linkedMetric = linkedMetric(for: first)
-                InsightCard(
-                    eyebrow: first.kind.eyebrow,
-                    title: first.title,
-                    detail: first.detail,
-                    badge: "New",
-                    onPrimary: linkedMetric == nil ? nil : {
-                        if let linkedMetric {
-                            Haptics.tap()
-                            selectedTrendTarget = TrendSheetTarget(metric: linkedMetric)
-                        }
-                    },
-                    primaryLabel: "See trend"
-                )
+                VStack(alignment: .leading, spacing: 10) {
+                    InsightCard(
+                        eyebrow: first.kind.eyebrow,
+                        title: first.title,
+                        detail: first.detail,
+                        badge: "New",
+                        onPrimary: linkedMetric == nil ? nil : {
+                            if let linkedMetric {
+                                Haptics.tap()
+                                selectedTrendTarget = TrendSheetTarget(metric: linkedMetric)
+                            }
+                        },
+                        primaryLabel: "See trend"
+                    )
+                    insightSourceChips(for: first)
+                }
             }
         }
+    }
+
+    // MARK: Insight source chips
+
+    @ViewBuilder
+    private func insightSourceChips(for insight: HealthInsight) -> some View {
+        let sources = insightSources(for: insight)
+        if !sources.isEmpty {
+            FlowLayout(spacing: 6) {
+                ForEach(sources) { source in
+                    Button {
+                        Haptics.tap()
+                        tappedInsightSource = source
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: source.icon)
+                                .font(.system(size: 9, weight: .semibold))
+                            Text(source.label)
+                                .font(Theme.Font.body(11, weight: .medium))
+                        }
+                        .foregroundStyle(source.accent)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule()
+                                .fill(source.accent.opacity(0.10))
+                        )
+                        .overlay(
+                            Capsule()
+                                .strokeBorder(source.accent.opacity(0.25), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 4)
+        }
+    }
+
+    private func insightSources(for insight: HealthInsight) -> [ChatSource] {
+        switch insight.kind {
+        case .trend:
+            // Point to the most recent lab on file
+            let recentLab = labResults.first
+            let labLabel = recentLab.map { "Your labs · \($0.capturedAt.formatted(.dateTime.month(.abbreviated).day()))" }
+                ?? "Your labs · recent"
+            return [
+                ChatSource(
+                    label: labLabel,
+                    icon: "chart.line.uptrend.xyaxis",
+                    accent: Theme.Palette.coral,
+                    deepLink: .labResult(metric: recentLab?.metric ?? "")
+                )
+            ]
+        case .reminder:
+            // Point to the first active medication
+            let med = medications.first
+            return [
+                ChatSource(
+                    label: med.map { "Your meds · \($0.name)" } ?? "Your meds",
+                    icon: "pills.fill",
+                    accent: Theme.Palette.sageDeep,
+                    deepLink: .medication(name: med?.name ?? "")
+                )
+            ]
+        case .flag:
+            // Flagged insight: lab source + AI inference note
+            let flaggedLab = labResults.first(where: { $0.status != .normal }) ?? labResults.first
+            let labLabel = flaggedLab.map { "Your labs · \($0.metric)" } ?? "Your labs · flagged"
+            return [
+                ChatSource(
+                    label: labLabel,
+                    icon: "flag.fill",
+                    accent: Theme.Palette.error,
+                    deepLink: .labResult(metric: flaggedLab?.metric ?? "")
+                ),
+                ChatSource(
+                    label: "AI inference · verify with your doctor",
+                    icon: "sparkles",
+                    accent: Theme.Palette.inkMuted,
+                    deepLink: .aiInference
+                )
+            ]
+        }
+    }
+
+    @ViewBuilder
+    private func insightSourceSheet(_ source: ChatSource) -> some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: Theme.Space.lg) {
+                switch source.deepLink {
+                case .labResult(let metric) where !metric.isEmpty:
+                    if let lab = labResults.first(where: { $0.metric.localizedCaseInsensitiveContains(metric) }) ?? labResults.first {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(lab.metric)
+                                .font(Theme.Font.display(22, weight: .bold))
+                                .foregroundStyle(Theme.Palette.ink)
+                            Text("\(lab.valueText)  ·  \(lab.status.displayName.capitalized)")
+                                .font(Theme.Font.body(16, weight: .medium))
+                                .foregroundStyle(lab.status == .normal ? Theme.Palette.sageDeep : Theme.Palette.error)
+                            Text("Recorded \(lab.capturedAt.formatted(.dateTime.month(.wide).day().year()))")
+                                .font(Theme.Font.body(13))
+                                .foregroundStyle(Theme.Palette.inkMuted)
+                        }
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                .fill(Theme.Palette.surfaceContainerLowest)
+                        )
+                        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .strokeBorder(Theme.Palette.outlineVariant.opacity(0.9), lineWidth: 1))
+                    } else {
+                        Text("No lab data on file yet.")
+                            .foregroundStyle(Theme.Palette.inkMuted)
+                    }
+                case .medication(let name) where !name.isEmpty:
+                    if let med = medications.first(where: { $0.name.localizedCaseInsensitiveContains(name) }) ?? medications.first {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(med.name)
+                                .font(Theme.Font.display(22, weight: .bold))
+                                .foregroundStyle(Theme.Palette.ink)
+                            Text(med.doseText)
+                                .font(Theme.Font.body(16, weight: .medium))
+                                .foregroundStyle(Theme.Palette.inkSoft)
+                            Text(med.scheduleText)
+                                .font(Theme.Font.body(13))
+                                .foregroundStyle(Theme.Palette.inkMuted)
+                        }
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                .fill(Theme.Palette.surfaceContainerLowest)
+                        )
+                        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .strokeBorder(Theme.Palette.outlineVariant.opacity(0.9), lineWidth: 1))
+                    } else {
+                        Text("No medication data on file yet.")
+                            .foregroundStyle(Theme.Palette.inkMuted)
+                    }
+                default:
+                    // AI inference or fallback
+                    VStack(alignment: .leading, spacing: 12) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 32))
+                            .foregroundStyle(Theme.Palette.inkMuted)
+                        Text("AI-generated insight")
+                            .font(Theme.Font.display(20, weight: .bold))
+                            .foregroundStyle(Theme.Palette.ink)
+                        Text("This insight was generated by on-device AI based on your health profile. It's meant to surface patterns, not to diagnose or replace medical advice. Always verify with your doctor.")
+                            .font(Theme.Font.body(15))
+                            .foregroundStyle(Theme.Palette.inkSoft)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                Spacer()
+            }
+            .padding(Theme.Space.lg)
+            .background(Theme.Palette.paper.ignoresSafeArea())
+            .navigationTitle(source.label)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { tappedInsightSource = nil }
+                        .foregroundStyle(Theme.Palette.primary)
+                }
+            }
+        }
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
     }
 
     // MARK: Timeline of today's scheduled meds + HealthKit summary

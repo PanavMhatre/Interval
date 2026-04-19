@@ -45,7 +45,8 @@ enum SampleData {
             schedule: .daily, intervalHours: 24,
             withFood: false, withWater: true,
             preferredTimes: ["7:00 AM"],
-            notes: "For blood pressure"
+            notes: "For blood pressure",
+            quantityRemaining: 24
         )
         let metformin = Medication(
             name: "Metformin", brand: nil,
@@ -53,7 +54,8 @@ enum SampleData {
             schedule: .daily, intervalHours: 24,
             withFood: true, withWater: true,
             preferredTimes: ["6:00 PM"],
-            notes: "Take with dinner"
+            notes: "Take with dinner",
+            quantityRemaining: 30
         )
         let iron = Medication(
             name: "Iron supplement", brand: "Ferrous sulfate",
@@ -61,7 +63,8 @@ enum SampleData {
             schedule: .daily, intervalHours: 24,
             withFood: false, withWater: true,
             preferredTimes: ["8:00 AM"],
-            notes: "Morning — away from calcium"
+            notes: "Morning — away from calcium",
+            quantityRemaining: 28
         )
         [lisinopril, metformin, iron].forEach(context.insert)
 

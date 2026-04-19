@@ -1,6 +1,8 @@
 import Foundation
-import FoundationModels
 import SwiftData
+
+#if canImport(FoundationModels)
+import FoundationModels
 
 /// Structured output schema for Foundation Models — one medical document.
 @Generable
@@ -36,8 +38,32 @@ struct ExtractedLab {
     var status: String
 }
 
-/// Turns raw OCR text into a structured `ExtractedDocument` using an
-/// on-device Foundation Models session.
+#else
+
+// Plain structs used when FoundationModels is not available (pre-Xcode 26)
+struct ExtractedDocument {
+    var title: String
+    var kind: String
+    var provider: String
+    var summary: String
+    var flagged: Bool
+    var labs: [ExtractedLab]
+}
+
+struct ExtractedLab {
+    var metric: String
+    var value: Double
+    var unit: String
+    var status: String
+}
+
+#endif
+
+// MARK: - DocumentAnalyzer
+
+/// Turns raw OCR text into a structured `ExtractedDocument`.
+/// On Xcode 26+ with Apple Intelligence enabled, uses an on-device
+/// LanguageModelSession. Falls back to a regex heuristic on older Xcode.
 @MainActor
 final class DocumentAnalyzer {
 
@@ -56,12 +82,10 @@ final class DocumentAnalyzer {
         let cleaned = ocrText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else { throw AnalyzeError.emptyText }
 
+#if canImport(FoundationModels)
         let model = SystemLanguageModel.default
         switch model.availability {
-        case .unavailable(let reason):
-            // Heuristic fallback so the UX still works on devices without
-            // Apple Intelligence.
-            _ = reason
+        case .unavailable:
             return Self.heuristic(from: cleaned)
         case .available:
             break
@@ -77,36 +101,35 @@ final class DocumentAnalyzer {
             Never invent values that aren't in the text.
             """)
 
-        let prompt = """
-            OCR TEXT:
-            \(cleaned)
-            """
-
-        let response = try await session.respond(to: prompt, generating: ExtractedDocument.self)
+        let response = try await session.respond(to: cleaned, generating: ExtractedDocument.self)
         return response.content
+#else
+        return Self.heuristic(from: cleaned)
+#endif
     }
 
-    // MARK: - Heuristic fallback
+    // MARK: - Heuristic fallback (always available)
 
-    private static func heuristic(from text: String) -> ExtractedDocument {
+    static func heuristic(from text: String) -> ExtractedDocument {
         let lower = text.lowercased()
         let kind: String
-        if lower.contains("rx") || lower.contains("prescription") { kind = "prescription" }
-        else if lower.contains("result") || lower.contains("reference") || lower.contains("mg/dl") { kind = "labPanel" }
-        else if lower.contains("x-ray") || lower.contains("mri") || lower.contains("ct ") { kind = "imaging" }
-        else if lower.contains("visit") || lower.contains("progress note") { kind = "visitNote" }
-        else { kind = "other" }
+        if lower.contains("rx") || lower.contains("prescription")          { kind = "prescription" }
+        else if lower.contains("result") || lower.contains("reference") ||
+                lower.contains("mg/dl")                                    { kind = "labPanel"     }
+        else if lower.contains("x-ray") || lower.contains("mri") ||
+                lower.contains("ct ")                                      { kind = "imaging"      }
+        else if lower.contains("visit") || lower.contains("progress note") { kind = "visitNote"    }
+        else                                                               { kind = "other"        }
 
-        // Attempt to pull out simple "metric: value unit" lines
         var labs: [ExtractedLab] = []
         let pattern = #"([A-Za-z][A-Za-z0-9 \-]{1,20})[:\s]+([0-9]+\.?[0-9]*)\s*(%|mg\/dL|ng\/mL|µg\/dL|mmol\/L|bpm)"#
         if let regex = try? NSRegularExpression(pattern: pattern) {
             let ns = text as NSString
             let matches = regex.matches(in: text, range: NSRange(location: 0, length: ns.length))
             for m in matches.prefix(6) where m.numberOfRanges >= 4 {
-                let metric = ns.substring(with: m.range(at: 1)).trimmingCharacters(in: .whitespaces)
+                let metric   = ns.substring(with: m.range(at: 1)).trimmingCharacters(in: .whitespaces)
                 let valueStr = ns.substring(with: m.range(at: 2))
-                let unit = ns.substring(with: m.range(at: 3))
+                let unit     = ns.substring(with: m.range(at: 3))
                 if let value = Double(valueStr) {
                     labs.append(ExtractedLab(metric: metric, value: value, unit: unit, status: "normal"))
                 }

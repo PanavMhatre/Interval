@@ -30,6 +30,7 @@ final class Medication {
     var notes: String?
     var remindersEnabled: Bool
     var createdAt: Date
+    var quantityRemaining: Int?
 
     @Relationship(deleteRule: .cascade, inverse: \DoseLog.medication)
     var logs: [DoseLog] = []
@@ -48,7 +49,8 @@ final class Medication {
         preferredTimes: [String] = [],
         notes: String? = nil,
         remindersEnabled: Bool = true,
-        createdAt: Date = .now
+        createdAt: Date = .now,
+        quantityRemaining: Int? = nil
     ) {
         self.name = name
         self.brand = brand
@@ -64,6 +66,7 @@ final class Medication {
         self.notes = notes
         self.remindersEnabled = remindersEnabled
         self.createdAt = createdAt
+        self.quantityRemaining = quantityRemaining
     }
 
     var form: DoseForm {

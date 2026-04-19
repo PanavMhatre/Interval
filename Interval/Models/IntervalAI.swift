@@ -1,6 +1,8 @@
 import Foundation
-import FoundationModels
 import SwiftData
+
+#if canImport(FoundationModels)
+import FoundationModels
 
 @Generable
 struct DoctorEmailDraftContent {
@@ -10,9 +12,17 @@ struct DoctorEmailDraftContent {
     @Guide(description: "A ready-to-send email body in first person from the patient. Keep it concise, grounded in the provided request and summary, and avoid markdown.")
     var body: String
 }
+#else
+struct DoctorEmailDraftContent {
+    var subject: String
+    var body: String
+}
+#endif
 
 /// Grounds Foundation Models with the user's medical profile and wraps
 /// `LanguageModelSession` with availability checks + a fallback path.
+/// On Xcode versions that don't include FoundationModels (pre-Xcode 26),
+/// the AI feature gracefully degrades to an unavailable state.
 @MainActor
 @Observable
 final class IntervalAI {
@@ -23,13 +33,16 @@ final class IntervalAI {
     }
 
     var status: Status = .unavailable("Checking…")
-    private(set) var session: LanguageModelSession?
 
+#if canImport(FoundationModels)
+    private(set) var session: LanguageModelSession?
     private let model = SystemLanguageModel.default
+#endif
 
     /// Builds a fresh session with instructions derived from the user's health
     /// profile. Call after the model container has data so the AI has context.
     func prepare(with context: ModelContext) {
+#if canImport(FoundationModels)
         switch model.availability {
         case .available:
             status = .available
@@ -39,11 +52,15 @@ final class IntervalAI {
             status = .unavailable(Self.describe(reason))
             session = nil
         }
+#else
+        status = .unavailable("Apple Intelligence requires Xcode 26 / iOS 26.")
+#endif
     }
 
     /// Streams a response for the user's prompt. Yields snapshots of the
     /// evolving text so the UI can render it as it arrives.
     func stream(userPrompt: String) -> AsyncThrowingStream<String, Error> {
+#if canImport(FoundationModels)
         AsyncThrowingStream { continuation in
             let task = Task { [weak self] in
                 guard let self, let session = self.session else {
@@ -62,9 +79,20 @@ final class IntervalAI {
             }
             continuation.onTermination = { _ in task.cancel() }
         }
+#else
+        AsyncThrowingStream { continuation in
+            continuation.finish(throwing: Self.fallbackError)
+        }
+#endif
     }
 
-    var isResponding: Bool { session?.isResponding ?? false }
+    var isResponding: Bool {
+#if canImport(FoundationModels)
+        session?.isResponding ?? false
+#else
+        false
+#endif
+    }
 
     func generateDoctorDraft(
         request: String,
@@ -84,6 +112,7 @@ final class IntervalAI {
             )
         }
 
+#if canImport(FoundationModels)
         switch model.availability {
         case .available:
             let session = LanguageModelSession(instructions: Self.doctorDraftInstructions)
@@ -129,9 +158,17 @@ final class IntervalAI {
                 patientName: patientName
             )
         }
+#else
+        return Self.fallbackDoctorDraft(
+            request: cleanedRequest,
+            summary: cleanedSummary,
+            doctorName: doctorName,
+            patientName: patientName
+        )
+#endif
     }
 
-    // MARK: - Instructions
+    // MARK: - Shared Helpers
 
     private static func buildInstructions(context: ModelContext) -> String {
         let profile = (try? context.fetch(FetchDescriptor<UserProfile>()))?.first
@@ -183,6 +220,17 @@ final class IntervalAI {
         """
     }
 
+#if canImport(FoundationModels)
+    private static func describe(_ reason: SystemLanguageModel.Availability.UnavailableReason) -> String {
+        switch reason {
+        case .deviceNotEligible:           "This device doesn't support Apple Intelligence."
+        case .appleIntelligenceNotEnabled: "Turn on Apple Intelligence in Settings to chat with Interval."
+        case .modelNotReady:               "Interval's model is still downloading. Check back in a minute."
+        @unknown default:                  "Apple Intelligence isn't available right now."
+        }
+    }
+#endif
+
     private static var doctorDraftInstructions: String {
         """
         You write concise, warm emails from a patient to a clinician.
@@ -196,21 +244,10 @@ final class IntervalAI {
         """
     }
 
-    // MARK: - Helpers
-
     private static var fallbackError: Error {
         NSError(domain: "IntervalAI", code: -1, userInfo: [
             NSLocalizedDescriptionKey: "Apple Intelligence isn't available on this device."
         ])
-    }
-
-    private static func describe(_ reason: SystemLanguageModel.Availability.UnavailableReason) -> String {
-        switch reason {
-        case .deviceNotEligible:       "This device doesn't support Apple Intelligence."
-        case .appleIntelligenceNotEnabled: "Turn on Apple Intelligence in Settings to chat with Interval."
-        case .modelNotReady:           "Interval's model is still downloading. Check back in a minute."
-        @unknown default:              "Apple Intelligence isn't available right now."
-        }
     }
 
     private static func fallbackDoctorDraft(
