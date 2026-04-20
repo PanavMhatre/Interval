@@ -32,6 +32,7 @@ struct ContentView: View {
                 Haptics.prepareAll()
                 didPrepareHaptics = true
             }
+            KeyboardDismissal.installIfNeeded()
         }
         .task {
             // Auto-link Apple Health on every launch. Apple's authorization

@@ -151,22 +151,29 @@ struct ChatView: View {
                     .contentShape(Rectangle())
                 }
                 .scrollDismissesKeyboard(.interactively)
-                .simultaneousGesture(
-                    TapGesture().onEnded {
-                        inputFocused = false
-                    }
-                )
                 .onChange(of: messages.count) {
                     withAnimation(.smooth) { proxy.scrollTo(messages.last?.id, anchor: .bottom) }
                 }
                 .onChange(of: messages.last?.text) {
                     withAnimation(.smooth) { proxy.scrollTo(messages.last?.id, anchor: .bottom) }
                 }
+                .onChange(of: inputFocused) { _, focused in
+                    guard focused else { return }
+                    // Keyboard presentation animates alongside the safe-area
+                    // inset change; delay one tick so the new content offset
+                    // is in place before we scroll.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        withAnimation(.smooth) {
+                            proxy.scrollTo(messages.last?.id, anchor: .bottom)
+                        }
+                    }
+                }
             }
-
-            inputBar
         }
         .background(Theme.Palette.paper)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            inputBar
+        }
         .onAppear {
             ai.prepare(with: context)
             if messages.isEmpty { seed() }
